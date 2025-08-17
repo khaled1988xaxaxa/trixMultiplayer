@@ -1,0 +1,71 @@
+# Ignore large AI model files and zips that exceed GitHub's file size limit
+trix/assets/ai_models_backup/*.json
+trix/assets/ai_models_backup/**/*.json
+trix/assets/ai_models_backup/*.pth
+trix/assets/ai_models_backup/**/*.pth
+trix/assets/flutter_ai_package/*.zip
+trix/assets/flutter_ai_package/**/*.zip
+# Keep all remaining AI model files
+# Only strategic_elite_ai and human_enhanced_ai are active
+# These models are included in the repository
+
+# Exclude directories with large models
+assets/ai_models_backup/
+assets/flutter_ai_package/agent_gen*.zip
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Ignore Python virtual environments
+.venv/
+# Ignore build outputs
+build/
+# Ignore model and backup files over 100MB
+trix/assets/ai_models_backup/
+trix/assets/flutter_ai_package/
+*.zip
+*.pt
+*.pth
+*.json

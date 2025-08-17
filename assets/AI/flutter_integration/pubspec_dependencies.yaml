@@ -1,0 +1,11 @@
+dependencies:
+  flutter:
+    sdk: flutter
+  pytorch_lite: ^1.0.0  # For PyTorch model loading
+  
+  # Alternative options:
+  # tflite_flutter: ^0.10.1  # If you convert to TensorFlow Lite
+  # onnxruntime: ^1.14.1     # If you convert to ONNX
+
+assets:
+  - assets/models/trix_agent_model.pt

@@ -1,0 +1,62 @@
+{
+  "appTitle": "Trix",
+  "@appTitle": {
+    "description": "The title of the application"
+  },
+  "welcome": "Welcome to Trix",
+  "@welcome": {
+    "description": "Welcome message"
+  },
+  "newGame": "New Game",
+  "@newGame": {
+    "description": "Start a new game button"
+  },
+  "joinGame": "Join Game",
+  "@joinGame": {
+    "description": "Join existing game button"
+  },
+  "settings": "Settings",
+  "@settings": {
+    "description": "Settings menu"
+  },
+  "players": "Players",
+  "@players": {
+    "description": "Players label"
+  },
+  "score": "Score",
+  "@score": {
+    "description": "Score label"
+  },
+  "trump": "Trump",
+  "@trump": {
+    "description": "Trump game mode"
+  },
+  "noTrump": "No Trump",
+  "@noTrump": {
+    "description": "No Trump game mode"
+  },
+  "bid": "Bid",
+  "@bid": {
+    "description": "Bidding action"
+  },
+  "pass": "Pass",
+  "@pass": {
+    "description": "Pass bidding action"
+  },
+  "hearts": "Hearts",
+  "@hearts": {
+    "description": "Hearts suit"
+  },
+  "diamonds": "Diamonds",
+  "@diamonds": {
+    "description": "Diamonds suit"
+  },
+  "clubs": "Clubs",
+  "@clubs": {
+    "description": "Clubs suit"
+  },
+  "spades": "Spades",
+  "@spades": {
+    "description": "Spades suit"
+  }
+}
