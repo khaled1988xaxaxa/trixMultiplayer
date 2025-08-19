@@ -239,29 +239,69 @@ class ServerCard {
     );
   }
 
-  String get imagePath {
-    // Convert server card format to your existing card image format
-    String suitName = suit.toLowerCase();
-    String cardName = rank.toLowerCase();
-    
-    // Map rank names to your image naming convention
-    switch (cardName) {
-      case 'a':
-        cardName = 'ace';
-        break;
-      case 'j':
-        cardName = 'jack';
-        break;
-      case 'q':
-        cardName = 'queen';
-        break;
-      case 'k':
-        cardName = 'king';
-        break;
+      String get imagePath {
+      // Convert server card format to your existing card image format
+      String suitName = suit.toLowerCase();
+      String cardName = rank.toLowerCase();
+      
+      // Map rank names to your image naming convention
+      switch (cardName) {
+        case 'a':
+        case 'ace':
+          cardName = 'ace';
+          break;
+        case 'j':
+        case 'jack':
+          cardName = 'jack';
+          break;
+        case 'q':
+        case 'queen':
+          cardName = 'queen';
+          break;
+        case 'k':
+        case 'king':
+          cardName = 'king';
+          break;
+        case '10':
+        case 'ten':
+          cardName = '10';
+          break;
+        case '9':
+        case 'nine':
+          cardName = '9';
+          break;
+        case '8':
+        case 'eight':
+          cardName = '8';
+          break;
+        case '7':
+        case 'seven':
+          cardName = '7';
+          break;
+        case '6':
+        case 'six':
+          cardName = '6';
+          break;
+        case '5':
+        case 'five':
+          cardName = '5';
+          break;
+        case '4':
+        case 'four':
+          cardName = '4';
+          break;
+        case '3':
+        case 'three':
+          cardName = '3';
+          break;
+        case '2':
+        case 'two':
+          cardName = '2';
+          break;
+      }
+      
+      return 'assets/cards/${cardName}${suitName[0].toUpperCase()}.png';
     }
-    
-    return 'assets/cards/${cardName}_of_${suitName}.png';
-  }
 }
 
 class ServerTrick {

@@ -318,7 +318,8 @@ class MessageHandler {
         contract
       }, sessionId);
       
-      this.broadcastGameState(room.id, gameState, sessionId);
+      // Broadcast updated game state to ALL players in the room
+      this.broadcastGameState(room.id, gameState);
       
       Logger.info(`📋 Contract ${contract} selected in room ${room.id}`);
       
@@ -346,6 +347,22 @@ class MessageHandler {
         throw new Error('Not in a room');
       }
       
+      // Get player info for validation logging
+      const playerInfo = room.players.get(sessionId);
+      if (playerInfo) {
+        Logger.debug(`🎯 [Card Validation] Player: ${playerInfo.position} (${playerInfo.name}) attempting to play card: ${cardId}`);
+        
+        // Log player's current hand for debugging
+        if (room.game) {
+          const gameState = room.game.getGameState(playerInfo.position);
+          const playerState = gameState.players[playerInfo.position];
+          if (playerState && playerState.hand) {
+            const handIds = playerState.hand.map(c => c.id).join(', ');
+            Logger.debug(`🎯 [Card Validation] Player hand: [${handIds}]`);
+          }
+        }
+      }
+      
       const gameState = room.playCard(sessionId, cardId);
       
       sendResponse({
@@ -361,7 +378,8 @@ class MessageHandler {
         cardId
       }, sessionId);
       
-      this.broadcastGameState(room.id, gameState, sessionId);
+      // Broadcast updated game state to ALL players in the room
+      this.broadcastGameState(room.id, gameState);
       
       Logger.info(`🃏 Card ${cardId} played in room ${room.id}`);
       

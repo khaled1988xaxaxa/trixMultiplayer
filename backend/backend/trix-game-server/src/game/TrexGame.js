@@ -110,6 +110,8 @@ class TrexGame {
     this.deck = this.createDeck();
     this.shuffleDeck();
     
+    Logger.debug(`🎯 [Card Dealing] Deck created with ${this.deck.length} cards`);
+    
     // Deal 13 cards to each player
     const cardsPerPlayer = 13;
     const playerPositions = Array.from(this.players.keys());
@@ -130,6 +132,12 @@ class TrexGame {
     
     // Find king of hearts
     this.findKingOfHearts();
+    
+    // Debug logging for each player's hand
+    for (const [position, player] of this.players) {
+      const cardIds = player.hand.map(c => c.id).join(', ');
+      Logger.debug(`🎯 [Card Dealing] ${position} (${player.name}): ${player.hand.length} cards - [${cardIds}]`);
+    }
     
     Logger.info(`🃏 Cards dealt. King of Hearts with: ${this.kingOfHeartsHolder}`);
   }
@@ -202,13 +210,21 @@ class TrexGame {
     
     const player = this.players.get(playerPosition);
 
-    // --- Start of new logging ---
+    // Enhanced card validation logging
     if (player) {
       const serverHand = player.hand.map(c => c.id).join(', ');
-      Logger.debug(`[Card Validation] Player: ${playerPosition}, Card: ${cardId}`);
-      Logger.debug(`[Card Validation] Server Hand: [${serverHand}]`);
+      Logger.debug(`🎯 [Card Validation] Player: ${playerPosition} (${player.name}), Attempting to play: ${cardId}`);
+      Logger.debug(`🎯 [Card Validation] Server Hand: [${serverHand}]`);
+      Logger.debug(`🎯 [Card Validation] Hand size: ${player.hand.length}`);
+      
+      // Check if card exists in hand
+      const hasCard = player.hasCard(cardId);
+      Logger.debug(`🎯 [Card Validation] Has card ${cardId}: ${hasCard}`);
+      
+      if (!hasCard) {
+        Logger.error(`❌ [Card Validation] Card ${cardId} NOT found in player ${playerPosition}'s hand!`);
+      }
     }
-    // --- End of new logging ---
 
     if (!player || !player.hasCard(cardId)) {
       throw new Error('Player does not have this card');
@@ -508,8 +524,21 @@ class TrexGame {
     
     // Add player data
     for (const [position, player] of this.players) {
-      const isCurrentPlayer = (forPlayer !== null && forPlayer === player.id) || (forPlayer === null && player.position === this.currentPlayer);
-      state.players[position] = player.toJson(false, isCurrentPlayer);
+      // Always include hand for the requesting player, never for others
+      const isRequestingPlayer = forPlayer === position;
+      const playerData = player.toJson(false, isRequestingPlayer);
+      state.players[position] = playerData;
+      
+      // Debug logging for card synchronization
+      if (isRequestingPlayer) {
+        Logger.debug(`🎯 [Card Sync] Player ${position} (${player.name}) gets ${playerData.hand?.length || 0} cards`);
+        if (playerData.hand) {
+          const cardIds = playerData.hand.map(c => c.id).join(', ');
+          Logger.debug(`🎯 [Card Sync] Cards: [${cardIds}]`);
+        }
+      } else {
+        Logger.debug(`🎯 [Card Sync] Player ${position} (${player.name}) gets handSize: ${playerData.handSize}`);
+      }
     }
     
     return state;

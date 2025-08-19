@@ -136,6 +136,19 @@ class MultiplayerClient with ChangeNotifier {
       return;
     }
     
+    // Validate that the player actually has this card
+    final myPosition = this.myPosition;
+    if (myPosition != null) {
+      final myPlayer = _currentGame!.players[myPosition];
+      if (myPlayer != null) {
+        final hasCard = myPlayer.hand.any((card) => card.id == cardId);
+        if (!hasCard) {
+          _setError('You do not have this card: $cardId');
+          return;
+        }
+      }
+    }
+    
     _websocket.playCard(_currentRoomId!, cardId);
   }
 
@@ -195,6 +208,9 @@ class MultiplayerClient with ChangeNotifier {
         break;
       case 'AI_CARD_PLAYED':
         _handleAICardPlayed(message);
+        break;
+      case 'CARD_PLAYED':
+        _handleCardPlayed(message);
         break;
       case 'PLAYER_KICKED':
         _handlePlayerKicked(message);
@@ -276,6 +292,22 @@ class MultiplayerClient with ChangeNotifier {
     if (gameData != null) {
       _currentGame = ServerGame.fromJson(gameData);
       _setState(MultiplayerState.inGame);
+      
+      // Debug logging for card synchronization
+      if (_currentGame != null) {
+        final myPosition = this.myPosition;
+        if (myPosition != null) {
+          final myPlayer = _currentGame!.players[myPosition];
+          if (myPlayer != null) {
+            print('🎯 [Flutter Card Sync] Player: $myPosition, Hand size: ${myPlayer.hand.length}');
+            if (myPlayer.hand.isNotEmpty) {
+              final cardIds = myPlayer.hand.map((c) => c.id).join(', ');
+              print('🎯 [Flutter Card Sync] Cards: [$cardIds]');
+            }
+          }
+        }
+      }
+      
       notifyListeners();
     }
   }
@@ -330,6 +362,41 @@ class MultiplayerClient with ChangeNotifier {
       // Handle AI card play action
       print('🤖 AI played card: ${actionData['cardId']} by ${actionData['player']}');
       // Request updated game state from server
+      _websocket.sendMessage({
+        'type': 'GET_GAME_STATE',
+        'timestamp': DateTime.now().toIso8601String()
+      });
+    }
+  }
+
+  void _handleCardPlayed(ServerMessage message) {
+    final cardData = message.data['card'];
+    final playerData = message.data['player'];
+    final gameStateData = message.data['gameState'];
+    
+    if (kDebugMode) {
+      print('🃏 CARD_PLAYED received:');
+      print('   Card: $cardData');
+      print('   Player: $playerData');
+      print('   Game State: $gameStateData');
+    }
+    
+    // Update the current game state if provided
+    if (gameStateData != null) {
+      try {
+        _currentGame = ServerGame.fromJson(gameStateData);
+        if (kDebugMode) print('✅ Updated game state from CARD_PLAYED message');
+      } catch (e) {
+        if (kDebugMode) print('❌ Error parsing game state from CARD_PLAYED: $e');
+      }
+    }
+    
+    // Notify listeners about the card play
+    notifyListeners();
+    
+    // If no game state was provided, request an update
+    if (gameStateData == null) {
+      if (kDebugMode) print('🔄 Requesting updated game state from server');
       _websocket.sendMessage({
         'type': 'GET_GAME_STATE',
         'timestamp': DateTime.now().toIso8601String()
@@ -404,18 +471,57 @@ class MultiplayerClient with ChangeNotifier {
   }
 
   // Helper method to get player's cards
-  // Note: Cards are typically sent separately for security reasons in multiplayer games
-  // The server game state only contains handSize, not actual cards
-  List<dynamic> getMyCards() {
-    // TODO: Implement proper card handling through separate WebSocket messages
-    // For now, return empty list until we implement card dealing messages
-    return [];
+  List<ServerCard> getMyCards() {
+    if (_currentGame == null) return [];
+    
+    final myPosition = this.myPosition;
+    if (myPosition == null) return [];
+    
+    final myPlayer = _currentGame!.players[myPosition];
+    if (myPlayer == null) return [];
+    
+    return myPlayer.hand;
   }
 
   // Helper method to check if it's my turn
   bool get isMyTurn {
     if (_currentGame == null) return false;
     return _currentGame!.currentPlayer == myPosition;
+  }
+
+  // Debug method to test card synchronization
+  void debugCardSync() {
+    if (_currentGame == null) {
+      print('🎯 [Debug] No active game');
+      return;
+    }
+    
+    print('🎯 [Debug] Game Phase: ${_currentGame!.phase}');
+    print('🎯 [Debug] Current Player: ${_currentGame!.currentPlayer}');
+    print('🎯 [Debug] My Position: ${this.myPosition}');
+    print('🎯 [Debug] Is My Turn: $isMyTurn');
+    
+    final currentPosition = this.myPosition;
+    if (currentPosition != null) {
+      final myPlayer = _currentGame!.players[currentPosition];
+      if (myPlayer != null) {
+        print('🎯 [Debug] My Player: ${myPlayer.name}');
+        print('🎯 [Debug] My Hand Size: ${myPlayer.handSize}');
+        print('🎯 [Debug] My Actual Hand: ${myPlayer.hand.length} cards');
+        
+        if (myPlayer.hand.isNotEmpty) {
+          final cardIds = myPlayer.hand.map((c) => '${c.rank}${c.suit[0].toUpperCase()}').join(', ');
+          print('🎯 [Debug] My Cards: [$cardIds]');
+        }
+      } else {
+        print('🎯 [Debug] My player data not found!');
+      }
+    }
+    
+    // Show all players
+    _currentGame!.players.forEach((position, player) {
+      print('🎯 [Debug] Player $position: ${player.name}, Hand: ${player.hand.length} cards');
+    });
   }
 
   // Helper method to get current trick cards

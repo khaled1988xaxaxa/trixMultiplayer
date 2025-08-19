@@ -647,6 +647,21 @@ class RoomManager {
       }
     }
   }
+
+  // Get server statistics
+  getStats() {
+    return {
+      totalRooms: this.rooms.size,
+      activeRooms: Array.from(this.rooms.values()).filter(room => room.isActive()).length,
+      totalPlayers: Array.from(this.rooms.values()).reduce((total, room) => total + room.players.size, 0),
+      totalSpectators: Array.from(this.rooms.values()).reduce((total, room) => total + room.spectators.size, 0),
+      roomsByStatus: {
+        waiting: Array.from(this.rooms.values()).filter(room => room.status === 'waiting').length,
+        playing: Array.from(this.rooms.values()).filter(room => room.status === 'playing').length,
+        finished: Array.from(this.rooms.values()).filter(room => room.status === 'finished').length
+      }
+    };
+  }
 }
 
 module.exports = { RoomManager, GameRoom };

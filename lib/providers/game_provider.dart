@@ -1103,22 +1103,131 @@ class GameProvider with ChangeNotifier {
       }
 
       // --- HAND SYNC LOGIC ---
-      // If serverGameState is a ServerGame, update the local hand sizes to match server
-      if (serverGameState is dynamic && serverGameState.players != null) {
-        // Find the local player by position
-        final myPosition = _game!.players.firstWhere((p) => p.id == currentUser?.id, orElse: () => _game!.players.first).position;
+      // Handle different types of server data
+      if (serverGameState is Map<String, dynamic>) {
+        // Raw data format - handle hand size sync
+        if (serverGameState['players'] != null) {
+          // Find the local player by position
+          final myPosition = _game!.players.firstWhere((p) => p.id == currentUser?.id, orElse: () => _game!.players.first).position;
+          final serverPlayer = serverGameState['players'][myPosition.name.toLowerCase()];
+          
+          // Safely access handSize property
+          if (serverPlayer != null && serverPlayer is Map<String, dynamic>) {
+            final handSize = serverPlayer['handSize'];
+            if (handSize != null && handSize is int) {
+              final localPlayer = _game!.players.firstWhere((p) => p.position == myPosition);
+              if (localPlayer.hand.length != handSize) {
+                if (kDebugMode) print('🖐️ [DEBUG] Syncing local hand size (${localPlayer.hand.length}) to server hand size ($handSize)');
+                // This is a minimal fix: in a real implementation, you would sync the actual cards, not just the count
+                while (localPlayer.hand.length > handSize) {
+                  localPlayer.hand.removeLast();
+                }
+                // Note: If local hand is too short, we cannot add cards without knowing which ones, so just log
+                if (localPlayer.hand.length < handSize) {
+                  if (kDebugMode) print('⚠️ [DEBUG] Local hand is too short; cannot add unknown cards.');
+                }
+              }
+            }
+          }
+        }
+      } else if (serverGameState.runtimeType.toString().contains('ServerGame')) {
+        // ServerGame object format - handle full card sync
+        final myPosition = _isMultiplayerMode && _multiplayerClient != null
+            ? PlayerPosition.values.firstWhere(
+                (p) => p.name.toLowerCase() == _multiplayerClient!.myPosition?.toLowerCase(),
+                orElse: () => PlayerPosition.south)
+            : PlayerPosition.south;
+        
+        final localPlayer = _game!.players.firstWhere((p) => p.position == myPosition, orElse: () => _game!.players.first);
         final serverPlayer = serverGameState.players[myPosition.name.toLowerCase()];
-        if (serverPlayer != null && serverPlayer.handSize != null) {
-          final localPlayer = _game!.players.firstWhere((p) => p.position == myPosition);
+        if (serverPlayer != null) {
+          // Sync hand size
           if (localPlayer.hand.length != serverPlayer.handSize) {
             if (kDebugMode) print('🖐️ [DEBUG] Syncing local hand size (${localPlayer.hand.length}) to server hand size (${serverPlayer.handSize})');
-            // This is a minimal fix: in a real implementation, you would sync the actual cards, not just the count
             while (localPlayer.hand.length > serverPlayer.handSize) {
               localPlayer.hand.removeLast();
             }
-            // Note: If local hand is too short, we cannot add cards without knowing which ones, so just log
             if (localPlayer.hand.length < serverPlayer.handSize) {
               if (kDebugMode) print('⚠️ [DEBUG] Local hand is too short; cannot add unknown cards.');
+            }
+          }
+          
+          // Sync actual cards if available
+          if (serverPlayer.hand.isNotEmpty) {
+            try {
+              localPlayer.hand.clear();
+              
+              for (final serverCard in serverPlayer.hand) {
+                final suit = Suit.values.firstWhere(
+                  (s) => s.name == serverCard.suit.toLowerCase(),
+                  orElse: () => Suit.hearts
+                );
+                final rank = Rank.values.firstWhere(
+                  (r) => r.name == serverCard.rank.toLowerCase(),
+                  orElse: () => Rank.ace
+                );
+                
+                localPlayer.hand.add(Card(
+                  id: serverCard.id.isNotEmpty ? serverCard.id : Card.generateId(suit, rank),
+                  suit: suit,
+                  rank: rank,
+                ));
+              }
+              
+              if (kDebugMode) {
+                print('🔄 [SYNC] Local hand updated from ServerGame. New hand:');
+                for (final c in localPlayer.hand) {
+                  print('   - ${c.rank.name} of ${c.suit.name}');
+                }
+              }
+            } catch (e) {
+              if (kDebugMode) print('❌ [SYNC] Failed to update local hand from ServerGame: $e');
+            }
+          }
+          
+          // Sync current trick from ServerGame
+          if (serverGameState.currentTrick != null) {
+            try {
+              final serverTrick = serverGameState.currentTrick!;
+              if (serverTrick.cards.isNotEmpty) {
+                // Find the lead player (first card played)
+                final firstCardEntry = serverTrick.cards.entries.first;
+                final leadPlayerStr = firstCardEntry.key;
+                final leadPlayer = _parsePlayerPosition(leadPlayerStr);
+                
+                final trick = Trick(leadPlayer: leadPlayer);
+                
+                // Add all cards to the trick
+                for (final entry in serverTrick.cards.entries) {
+                  final positionStr = entry.key;
+                  final serverCard = entry.value;
+                  
+                  if (serverCard != null) {
+                    final position = _parsePlayerPosition(positionStr);
+                    final card = Card(
+                      id: serverCard.id.isNotEmpty ? serverCard.id : Card.generateId(
+                        Suit.values.firstWhere((s) => s.name == serverCard.suit.toLowerCase(), orElse: () => Suit.hearts),
+                        Rank.values.firstWhere((r) => r.name == serverCard.rank.toLowerCase(), orElse: () => Rank.ace)
+                      ),
+                      suit: Suit.values.firstWhere(
+                        (s) => s.name == serverCard.suit.toLowerCase(),
+                        orElse: () => Suit.hearts
+                      ),
+                      rank: Rank.values.firstWhere(
+                        (r) => r.name == serverCard.rank.toLowerCase(),
+                        orElse: () => Rank.ace
+                      ),
+                    );
+                    
+                    trick.addCard(position, card);
+                  }
+                }
+                
+                _game!.currentTrick = trick;
+                if (kDebugMode) print('🃏 [SYNC] Updated current trick from ServerGame with ${trick.cards.length} cards');
+              }
+            } catch (e) {
+              if (kDebugMode) print('❌ [SYNC] Failed to sync current trick from ServerGame: $e');
             }
           }
         }
@@ -1158,38 +1267,55 @@ class GameProvider with ChangeNotifier {
       if (stateMap['kingdom'] != null) {
         _game!.kingdom = stateMap['kingdom'];
       }
-
-      // --- SYNC LOCAL HAND FROM SERVER ---
-      try {
-        // Find the local player position (assume south for now, or use multiplayerClient.myPosition)
-        final myPosition = _isMultiplayerMode && _multiplayerClient != null
-            ? PlayerPosition.values.firstWhere(
-                (p) => p.name.toLowerCase() == _multiplayerClient!.myPosition?.toLowerCase(),
-                orElse: () => PlayerPosition.south)
-            : PlayerPosition.south;
-        final localPlayer = _game!.players.firstWhere((p) => p.position == myPosition, orElse: () => _game!.players.first);
-        // Get server hand for this player
-        if (serverGameState.players != null && serverGameState.players[myPosition.name.toLowerCase()] != null) {
-          final serverPlayer = serverGameState.players[myPosition.name.toLowerCase()];
-          if (serverPlayer.hand != null && serverPlayer.hand.isNotEmpty) {
-            localPlayer.hand
-              ..clear()
-              ..addAll(serverPlayer.hand.map((sc) => Card(
-                id: sc.id,
-                suit: Suit.values.firstWhere((s) => s.name == sc.suit),
-                rank: Rank.values.firstWhere((r) => r.name == sc.rank),
-              )).toList());
-            if (kDebugMode) {
-              print('🔄 [SYNC] Local hand updated from server. New hand:');
-              for (final c in localPlayer.hand) {
-                print('   - \\${c.rank.name} of \\${c.suit.name}');
+      
+      // Sync current trick if available
+      if (stateMap['currentTrick'] != null) {
+        try {
+          final serverTrickData = stateMap['currentTrick'];
+          if (serverTrickData is Map<String, dynamic>) {
+            // Create a new Trick object
+            final cardsData = serverTrickData['cards'] as Map<String, dynamic>?;
+            if (cardsData != null && cardsData.isNotEmpty) {
+              // Find the lead player (first card played)
+              final firstCardEntry = cardsData.entries.first;
+              final leadPlayerStr = firstCardEntry.key;
+              final leadPlayer = _parsePlayerPosition(leadPlayerStr);
+              
+              final trick = Trick(leadPlayer: leadPlayer);
+              
+              // Add all cards to the trick
+              for (final entry in cardsData.entries) {
+                final positionStr = entry.key;
+                final cardData = entry.value;
+                
+                if (cardData != null && cardData is Map<String, dynamic>) {
+                  final position = _parsePlayerPosition(positionStr);
+                  final card = Card(
+                    id: cardData['id'] ?? '',
+                    suit: Suit.values.firstWhere(
+                      (s) => s.name == cardData['suit'].toString().toLowerCase(),
+                      orElse: () => Suit.hearts
+                    ),
+                    rank: Rank.values.firstWhere(
+                      (r) => r.name == cardData['rank'].toString().toLowerCase(),
+                      orElse: () => Rank.ace
+                    ),
+                  );
+                  
+                  trick.addCard(position, card);
+                }
               }
+              
+              _game!.currentTrick = trick;
+              if (kDebugMode) print('🃏 [SYNC] Updated current trick with ${trick.cards.length} cards');
             }
           }
+        } catch (e) {
+          if (kDebugMode) print('❌ [SYNC] Failed to sync current trick: $e');
         }
-      } catch (e) {
-        if (kDebugMode) print('❌ [SYNC] Failed to update local hand from server: $e');
       }
+
+      // Card synchronization is now handled in the HAND SYNC LOGIC section above
       
       // Notify listeners of the state change
       notifyListeners();

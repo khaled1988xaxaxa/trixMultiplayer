@@ -85,7 +85,8 @@ class Card {
   constructor(suit, rank) {
     this.suit = suit;
     this.rank = rank;
-    this.id = `${rank.shortName}${suit.charAt(0).toUpperCase()}`; // e.g., "AH", "KS"
+    // Match Flutter card ID format
+    this.id = `${rank.name}_of_${suit}`; // e.g., "ace_of_hearts", "king_of_spades"
   }
 
   toString() {
@@ -96,7 +97,7 @@ class Card {
     return {
       suit: this.suit,
       rank: this.rank.name,
-      id: `${this.rank.shortName}${this.suit.charAt(0).toUpperCase()}`
+      id: this.id // Use the consistent ID format
     };
   }
 
@@ -196,7 +197,7 @@ class Player {
     return this.hand.slice();
   }
 
-  toJson(includeHand = false, isCurrentPlayer = false) {
+  toJson(includeHand = false, isRequestingPlayer = false) {
     const playerData = {
       id: this.id,
       name: this.name,
@@ -209,10 +210,8 @@ class Player {
       handSize: this.hand.length
     };
 
-    // Always include hand for the current player
-    if (isCurrentPlayer) {
-      playerData.hand = this.hand.map(card => card.toJson());
-    } else if (includeHand) {
+    // Include hand for the requesting player (the one asking for game state)
+    if (isRequestingPlayer) {
       playerData.hand = this.hand.map(card => card.toJson());
     }
 

@@ -1,175 +1,32 @@
 /**
- * Database connection and models for MongoDB
+ * Simple in-memory database for testing (replaces MongoDB)
  */
 
-const mongoose = require('mongoose');
 const Logger = require('../utils/Logger');
 
 class Database {
   constructor() {
-    this.isConnected = false;
+    this.isConnected = true; // Always connected for in-memory
     this.connection = null;
   }
 
   async connect() {
-    try {
-      const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/trix_game';
-      const options = {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-        serverSelectionTimeoutMS: 5000,
-        heartbeatFrequencyMS: 2000,
-      };
-
-      this.connection = await mongoose.connect(mongoUri, options);
-      this.isConnected = true;
-      
-      Logger.info(`🗄️ Connected to MongoDB: ${mongoUri}`);
-      
-      // Setup connection event handlers
-      mongoose.connection.on('error', (error) => {
-        Logger.error('🗄️ MongoDB connection error:', error);
-      });
-
-      mongoose.connection.on('disconnected', () => {
-        Logger.warn('🗄️ MongoDB disconnected');
-        this.isConnected = false;
-      });
-
-      mongoose.connection.on('reconnected', () => {
-        Logger.info('🗄️ MongoDB reconnected');
-        this.isConnected = true;
-      });
-
-    } catch (error) {
-      Logger.error('🗄️ Failed to connect to MongoDB:', error);
-      throw error;
-    }
+    // No actual connection needed for in-memory
+    this.isConnected = true;
+    Logger.info('🗄️ Using in-memory database (no external dependencies)');
   }
 
   async disconnect() {
-    if (this.connection) {
-      await mongoose.disconnect();
-      this.isConnected = false;
-      Logger.info('🗄️ Disconnected from MongoDB');
-    }
+    this.isConnected = false;
+    Logger.info('🗄️ In-memory database disconnected');
   }
 }
 
-// Game Session Schema
-const gameSessionSchema = new mongoose.Schema({
-  gameId: { type: String, required: true, unique: true },
-  roomId: { type: String, required: true },
-  players: [{
-    sessionId: String,
-    name: String,
-    position: String,
-    isAI: Boolean,
-    finalScore: Number
-  }],
-  gameData: {
-    startedAt: Date,
-    completedAt: Date,
-    totalRounds: Number,
-    totalKingdoms: Number,
-    winner: String,
-    gameHistory: [mongoose.Schema.Types.Mixed]
-  },
-  metadata: {
-    duration: Number, // in milliseconds
-    averageRoundTime: Number,
-    contractsUsed: [String],
-    aiDifficulty: String
-  }
-}, {
-  timestamps: true
-});
-
-// Player Statistics Schema
-const playerStatsSchema = new mongoose.Schema({
-  sessionId: { type: String, required: true },
-  playerName: { type: String, required: true },
-  statistics: {
-    gamesPlayed: { type: Number, default: 0 },
-    gamesWon: { type: Number, default: 0 },
-    totalScore: { type: Number, default: 0 },
-    averageScore: { type: Number, default: 0 },
-    bestScore: { type: Number, default: 0 },
-    worstScore: { type: Number, default: 0 },
-    favoriteContract: { type: String, default: null },
-    contractsWon: {
-      kingOfHearts: { type: Number, default: 0 },
-      queens: { type: Number, default: 0 },
-      diamonds: { type: Number, default: 0 },
-      collections: { type: Number, default: 0 },
-      trex: { type: Number, default: 0 }
-    },
-    aiWins: { type: Number, default: 0 },
-    humanWins: { type: Number, default: 0 }
-  },
-  lastPlayed: { type: Date, default: Date.now }
-}, {
-  timestamps: true
-});
-
-// Room History Schema
-const roomHistorySchema = new mongoose.Schema({
-  roomId: { type: String, required: true },
-  hostName: { type: String, required: true },
-  settings: {
-    maxPlayers: Number,
-    aiDifficulty: String,
-    gameSpeed: String,
-    isPrivate: Boolean
-  },
-  lifecycle: {
-    createdAt: Date,
-    gameStartedAt: Date,
-    gameEndedAt: Date,
-    roomClosedAt: Date
-  },
-  players: [{
-    sessionId: String,
-    name: String,
-    joinedAt: Date,
-    leftAt: Date,
-    isAI: Boolean
-  }],
-  gameResult: {
-    winner: String,
-    finalScores: [mongoose.Schema.Types.Mixed],
-    totalDuration: Number
-  }
-}, {
-  timestamps: true
-});
-
-// Server Analytics Schema
-const serverAnalyticsSchema = new mongoose.Schema({
-  date: { type: Date, required: true, unique: true },
-  metrics: {
-    totalConnections: { type: Number, default: 0 },
-    uniquePlayers: { type: Number, default: 0 },
-    roomsCreated: { type: Number, default: 0 },
-    gamesCompleted: { type: Number, default: 0 },
-    averageGameDuration: { type: Number, default: 0 },
-    peakConcurrentUsers: { type: Number, default: 0 },
-    aiGamesPercentage: { type: Number, default: 0 }
-  },
-  performance: {
-    averageResponseTime: { type: Number, default: 0 },
-    errorRate: { type: Number, default: 0 },
-    uptime: { type: Number, default: 0 }
-  }
-}, {
-  timestamps: true
-});
-
-// Create models
-const GameSession = mongoose.model('GameSession', gameSessionSchema);
-const PlayerStats = mongoose.model('PlayerStats', playerStatsSchema);
-const RoomHistory = mongoose.model('RoomHistory', roomHistorySchema);
-const ServerAnalytics = mongoose.model('ServerAnalytics', serverAnalyticsSchema);
+// Simple in-memory storage
+const gameSessions = new Map();
+const playerStats = new Map();
+const roomHistory = new Map();
+const serverAnalytics = new Map();
 
 // Database service class
 class DatabaseService {
@@ -188,10 +45,9 @@ class DatabaseService {
   // Game Session methods
   async saveGameSession(gameSession) {
     try {
-      const session = new GameSession(gameSession);
-      await session.save();
+      gameSessions.set(gameSession.gameId, gameSession);
       Logger.info(`🗄️ Game session saved: ${gameSession.gameId}`);
-      return session;
+      return gameSession;
     } catch (error) {
       Logger.error('🗄️ Error saving game session:', error);
       throw error;
@@ -200,7 +56,7 @@ class DatabaseService {
 
   async getGameSession(gameId) {
     try {
-      return await GameSession.findOne({ gameId });
+      return gameSessions.get(gameId);
     } catch (error) {
       Logger.error('🗄️ Error getting game session:', error);
       throw error;
@@ -210,14 +66,32 @@ class DatabaseService {
   // Player Statistics methods
   async updatePlayerStats(sessionId, playerName, gameResult) {
     try {
-      let stats = await PlayerStats.findOne({ sessionId });
+      let stats = playerStats.get(sessionId);
       
       if (!stats) {
-        stats = new PlayerStats({
+        stats = {
           sessionId,
           playerName,
-          statistics: {}
-        });
+          statistics: {
+            gamesPlayed: 0,
+            gamesWon: 0,
+            totalScore: 0,
+            averageScore: 0,
+            bestScore: 0,
+            worstScore: 0,
+            favoriteContract: null,
+            contractsWon: {
+              kingOfHearts: 0,
+              queens: 0,
+              diamonds: 0,
+              collections: 0,
+              trex: 0
+            },
+            aiWins: 0,
+            humanWins: 0
+          },
+          lastPlayed: new Date()
+        };
       }
 
       // Update statistics
@@ -242,7 +116,7 @@ class DatabaseService {
 
       stats.lastPlayed = new Date();
       
-      await stats.save();
+      playerStats.set(sessionId, stats);
       Logger.info(`🗄️ Player stats updated: ${playerName}`);
       return stats;
       
@@ -254,7 +128,7 @@ class DatabaseService {
 
   async getPlayerStats(sessionId) {
     try {
-      return await PlayerStats.findOne({ sessionId });
+      return playerStats.get(sessionId);
     } catch (error) {
       Logger.error('🗄️ Error getting player stats:', error);
       throw error;
@@ -263,10 +137,16 @@ class DatabaseService {
 
   async getLeaderboard(limit = 10) {
     try {
-      return await PlayerStats.find({})
-        .sort({ 'statistics.averageScore': -1 })
-        .limit(limit)
-        .select('playerName statistics.gamesPlayed statistics.gamesWon statistics.averageScore');
+      const allStats = Array.from(playerStats.values());
+      return allStats
+        .sort((a, b) => b.statistics.averageScore - a.statistics.averageScore)
+        .slice(0, limit)
+        .map(stats => ({
+          playerName: stats.playerName,
+          'statistics.gamesPlayed': stats.statistics.gamesPlayed,
+          'statistics.gamesWon': stats.statistics.gamesWon,
+          'statistics.averageScore': stats.statistics.averageScore
+        }));
     } catch (error) {
       Logger.error('🗄️ Error getting leaderboard:', error);
       throw error;
@@ -276,10 +156,9 @@ class DatabaseService {
   // Room History methods
   async saveRoomHistory(roomHistory) {
     try {
-      const history = new RoomHistory(roomHistory);
-      await history.save();
+      roomHistory.set(roomHistory.roomId, roomHistory);
       Logger.info(`🗄️ Room history saved: ${roomHistory.roomId}`);
-      return history;
+      return roomHistory;
     } catch (error) {
       Logger.error('🗄️ Error saving room history:', error);
       throw error;
@@ -291,15 +170,13 @@ class DatabaseService {
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const dateKey = today.toISOString().split('T')[0];
 
-      await ServerAnalytics.findOneAndUpdate(
-        { date: today },
-        { 
-          $set: { metrics },
-          $inc: { 'metrics.totalConnections': 1 }
-        },
-        { upsert: true }
-      );
+      const existing = serverAnalytics.get(dateKey) || { metrics: {} };
+      existing.metrics = { ...existing.metrics, ...metrics };
+      existing.metrics.totalConnections = (existing.metrics.totalConnections || 0) + 1;
+      
+      serverAnalytics.set(dateKey, existing);
       
     } catch (error) {
       Logger.error('🗄️ Error updating analytics:', error);
@@ -309,12 +186,11 @@ class DatabaseService {
 
   async getAnalytics(days = 7) {
     try {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      
-      return await ServerAnalytics.find({
-        date: { $gte: startDate }
-      }).sort({ date: -1 });
+      const allAnalytics = Array.from(serverAnalytics.entries());
+      return allAnalytics
+        .sort((a, b) => new Date(b[0]) - new Date(a[0]))
+        .slice(0, days)
+        .map(([date, data]) => ({ date, ...data }));
       
     } catch (error) {
       Logger.error('🗄️ Error getting analytics:', error);
@@ -331,8 +207,8 @@ class DatabaseService {
 module.exports = {
   Database,
   DatabaseService,
-  GameSession,
-  PlayerStats,
-  RoomHistory,
-  ServerAnalytics
+  GameSession: null, // Not needed for in-memory
+  PlayerStats: null, // Not needed for in-memory
+  RoomHistory: null, // Not needed for in-memory
+  ServerAnalytics: null // Not needed for in-memory
 };

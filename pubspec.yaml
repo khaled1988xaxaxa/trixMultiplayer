@@ -79,42 +79,7 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/cards/
-    # AI models configuration (exclude large PyTorch files)
-    - assets/ai_models/ai_models_index.json
-    - assets/ai_models/ai_models_index_full.json
-    - assets/ai_models/ai_models_index_lightweight.json
-    # Lightweight AI models only (for faster loading)
-    - assets/ai_models/beginner_ai/
-    - assets/ai_models/novice_ai/
-    - assets/ai_models/amateur_ai/
-    # Temporarily disabled large AI models:
-    - assets/ai_models/intermediate_ai/
-    - assets/ai_models/advanced_ai/
-    - assets/ai_models/expert_ai/
-    - assets/ai_models/master_ai/
-    - assets/ai_models/aimaster_ai/
-    - assets/ai_models/perfect_ai/
-    # Custom trained models (only JSON configs, not .pt files)
-    - assets/ai_models/khaled_ai/
-    - assets/ai_models/mohammad_ai/
-    # Mobile-optimized Trix agents
-    - assets/ai_models/trix_agent_0_ai/
-    - assets/ai_models/trix_agent_1_ai/
-    - assets/ai_models/trix_agent_2_ai/
-    - assets/ai_models/trix_agent_3_ai/
-    # Enhanced AI models (JSON configs only)
-    - assets/ai_models/human_enhanced_ai/
-    - assets/ai_models/claude_sonnet_ai/
-    - assets/ai_models/chatgpt_ai/
+    # AI models that actually exist
     - assets/ai_models/strategic_elite_ai/
-    # AI configuration files (exclude large .pth and .pt files)
-    - assets/AI/agent_config.json
-    - assets/AI/agent_config_enhanced.json
-    - assets/AI/performance_metrics.json
-    - assets/AI/README.md
-    # Exclude large model files to reduce APK size:
-    # - assets/AI/*.pth (PyTorch models - too large for mobile)
-    # - assets/AI/*.pt (PyTorch models - too large for mobile)
-    # Elite AI models (Claude Sonnet and ChatGPT)
-    - assets/ai_models/claude_sonnet_ai/
-    - assets/ai_models/chatgpt_ai/
+    - assets/AI/
+    - assets/fonts/

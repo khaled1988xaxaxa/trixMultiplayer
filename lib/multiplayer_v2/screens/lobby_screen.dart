@@ -12,7 +12,7 @@ class MultiplayerLobbyScreenV2 extends StatefulWidget {
 
 class _MultiplayerLobbyScreenV2State extends State<MultiplayerLobbyScreenV2> {
   final TextEditingController _serverUrlController = 
-      TextEditingController(text: 'ws://192.168.0.80:8080');
+      TextEditingController(text: 'ws://localhost:8080');
   final TextEditingController _playerNameController = 
       TextEditingController(text: 'Player');
   final TextEditingController _roomNameController = 
