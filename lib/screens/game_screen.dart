@@ -260,11 +260,8 @@ class _GameScreenState extends State<GameScreen> {
         print('   Server phase: ${serverGame.phase}, Local phase: ${localGame.phase}');
         print('   Server current player: ${serverGame.currentPlayer}, Local current player: ${localGame.currentPlayer}');
       }
-      
-      // For now, just notify that we received an update
-      // The full sync implementation would be more complex
-      gameProvider.notifyServerUpdate();
-      
+      // Sync local game state with server state
+      gameProvider.syncWithServerGameState(serverGame);
     } catch (e) {
       if (kDebugMode) print('❌ Error syncing game state: $e');
     }

@@ -122,6 +122,7 @@ class ServerGamePlayer {
   final int totalScore;
   final bool isConnected;
   final int handSize;
+  final List<ServerCard> hand;
 
   ServerGamePlayer({
     required this.id,
@@ -133,6 +134,7 @@ class ServerGamePlayer {
     required this.totalScore,
     required this.isConnected,
     required this.handSize,
+    required this.hand,
   });
 
   factory ServerGamePlayer.fromJson(Map<String, dynamic> json) {
@@ -146,6 +148,9 @@ class ServerGamePlayer {
       totalScore: json['totalScore'] ?? 0,
       isConnected: json['isConnected'] ?? true,
       handSize: json['handSize'] ?? 0,
+      hand: json['hand'] != null
+        ? List<ServerCard>.from((json['hand'] as List).map((c) => ServerCard.fromJson(c)))
+        : [],
     );
   }
 }

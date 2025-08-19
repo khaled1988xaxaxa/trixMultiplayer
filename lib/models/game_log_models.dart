@@ -16,7 +16,7 @@ extension CardSerialization on Card {
     final suit = Suit.values.firstWhere((s) => s.name == suitName);
     final rank = Rank.values.firstWhere((r) => r.name == rankName);
     
-    return Card(suit: suit, rank: rank);
+    return Card(id: Card.generateId(suit, rank), suit: suit, rank: rank);
   }
 }
 

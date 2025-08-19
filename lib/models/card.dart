@@ -113,10 +113,15 @@ enum Rank {
 }
 
 class Card {
+  final String id;
   final Suit suit;
   final Rank rank;
 
-  const Card({required this.suit, required this.rank});
+  const Card({required this.id, required this.suit, required this.rank});
+
+  static String generateId(Suit suit, Rank rank) {
+    return '${rank.name}_of_${suit.name}';
+  }
 
   bool get isKingOfHearts => suit == Suit.hearts && rank == Rank.king;
 

@@ -214,7 +214,7 @@ class EliteAIService {
     String reasoning;
     
     if (validCards.isEmpty) {
-      chosenCard = Card(suit: Suit.clubs, rank: Rank.two);
+      chosenCard = Card(id: Card.generateId(Suit.clubs, Rank.two), suit: Suit.clubs, rank: Rank.two);
       reasoning = 'No valid cards available - fallback card';
     } else {
       // Elite AI fallback: choose strategically

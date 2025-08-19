@@ -218,7 +218,7 @@ class GameProvider with ChangeNotifier {
 
   void playCard(Card card) {
     if (_game == null || _game!.phase != GamePhase.playing) return;
-    
+
     // Log thinking time if we were tracking it
     if (_actionStartTime != null) {
       final thinkingTime = DateTime.now().difference(_actionStartTime!);
@@ -229,20 +229,26 @@ class GameProvider with ChangeNotifier {
         'contract': _game!.currentContract?.name,
       });
     }
-    
+
     try {
       // Log the card play before executing
       final humanPlayer = currentUser;
       if (humanPlayer != null) {
         _logger.logCardPlay(card, humanPlayer, _game!);
+        if (kDebugMode) {
+          print('🖐️ [DEBUG] Human player hand before play:');
+          for (final c in humanPlayer.hand) {
+            print('   - ${c.rank.name} of ${c.suit.name}');
+          }
+        }
       }
-      
+
       // In multiplayer mode, send the card to the server instead of playing locally
       if (_isMultiplayerMode && _multiplayerClient != null) {
-        if (kDebugMode) print('🌐 Sending card to server: ${card.toString()}');
-        // Create card ID in format expected by server (e.g., "king_hearts")
-        final cardId = '${card.rank.name}_${card.suit.name}';
-        _multiplayerClient!.playCard(cardId);
+        if (kDebugMode) print('DEBUGLOG: Sending card.id: ${card.id}');
+        if (kDebugMode) print('DEBUGLOG: Sending card.id: ${card.id}');
+        if (kDebugMode) print('🌐 Sending card to server: ${card.id}');
+        _multiplayerClient!.playCard(card.id);
         // Don't update local game state - wait for server response
       } else {
         // Single player mode - update local game state
@@ -708,7 +714,7 @@ class GameProvider with ChangeNotifier {
     // Check if player has King of Hearts in their hand (not just in valid cards)
     final playerHand = player.hand;
     final hasKingOfHeartsInHand = playerHand.any((card) => card.isKingOfHearts);
-    final kingOfHearts = validCards.firstWhere((c) => c.isKingOfHearts, orElse: () => Card(suit: Suit.clubs, rank: Rank.two));
+    final kingOfHearts = validCards.firstWhere((c) => c.isKingOfHearts, orElse: () => Card(id: Card.generateId(Suit.clubs, Rank.two), suit: Suit.clubs, rank: Rank.two));
     
     // STRATEGIC OPPORTUNITY: Check if we can safely discard King of Hearts
     if (hasKingOfHeartsInHand && kingOfHearts.isKingOfHearts) {
@@ -1095,6 +1101,28 @@ class GameProvider with ChangeNotifier {
       } else {
         if (kDebugMode) print('ℹ️ Current player already matches server');
       }
+
+      // --- HAND SYNC LOGIC ---
+      // If serverGameState is a ServerGame, update the local hand sizes to match server
+      if (serverGameState is dynamic && serverGameState.players != null) {
+        // Find the local player by position
+        final myPosition = _game!.players.firstWhere((p) => p.id == currentUser?.id, orElse: () => _game!.players.first).position;
+        final serverPlayer = serverGameState.players[myPosition.name.toLowerCase()];
+        if (serverPlayer != null && serverPlayer.handSize != null) {
+          final localPlayer = _game!.players.firstWhere((p) => p.position == myPosition);
+          if (localPlayer.hand.length != serverPlayer.handSize) {
+            if (kDebugMode) print('🖐️ [DEBUG] Syncing local hand size (${localPlayer.hand.length}) to server hand size (${serverPlayer.handSize})');
+            // This is a minimal fix: in a real implementation, you would sync the actual cards, not just the count
+            while (localPlayer.hand.length > serverPlayer.handSize) {
+              localPlayer.hand.removeLast();
+            }
+            // Note: If local hand is too short, we cannot add cards without knowing which ones, so just log
+            if (localPlayer.hand.length < serverPlayer.handSize) {
+              if (kDebugMode) print('⚠️ [DEBUG] Local hand is too short; cannot add unknown cards.');
+            }
+          }
+        }
+      }
       
       // Sync current king  
       final serverCurrentKing = _parsePlayerPosition(stateMap['currentKing']?.toString() ?? 'south');
@@ -1129,6 +1157,38 @@ class GameProvider with ChangeNotifier {
       }
       if (stateMap['kingdom'] != null) {
         _game!.kingdom = stateMap['kingdom'];
+      }
+
+      // --- SYNC LOCAL HAND FROM SERVER ---
+      try {
+        // Find the local player position (assume south for now, or use multiplayerClient.myPosition)
+        final myPosition = _isMultiplayerMode && _multiplayerClient != null
+            ? PlayerPosition.values.firstWhere(
+                (p) => p.name.toLowerCase() == _multiplayerClient!.myPosition?.toLowerCase(),
+                orElse: () => PlayerPosition.south)
+            : PlayerPosition.south;
+        final localPlayer = _game!.players.firstWhere((p) => p.position == myPosition, orElse: () => _game!.players.first);
+        // Get server hand for this player
+        if (serverGameState.players != null && serverGameState.players[myPosition.name.toLowerCase()] != null) {
+          final serverPlayer = serverGameState.players[myPosition.name.toLowerCase()];
+          if (serverPlayer.hand != null && serverPlayer.hand.isNotEmpty) {
+            localPlayer.hand
+              ..clear()
+              ..addAll(serverPlayer.hand.map((sc) => Card(
+                id: sc.id,
+                suit: Suit.values.firstWhere((s) => s.name == sc.suit),
+                rank: Rank.values.firstWhere((r) => r.name == sc.rank),
+              )).toList());
+            if (kDebugMode) {
+              print('🔄 [SYNC] Local hand updated from server. New hand:');
+              for (final c in localPlayer.hand) {
+                print('   - \\${c.rank.name} of \\${c.suit.name}');
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) print('❌ [SYNC] Failed to update local hand from server: $e');
       }
       
       // Notify listeners of the state change

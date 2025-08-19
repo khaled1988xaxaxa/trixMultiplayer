@@ -221,7 +221,7 @@ class TrexGame {
     List<Card> cards = [];
     for (Suit suit in Suit.values) {
       for (Rank rank in Rank.values) {
-        cards.add(Card(suit: suit, rank: rank));
+        cards.add(Card(id: Card.generateId(suit, rank), suit: suit, rank: rank));
       }
     }
     return cards;

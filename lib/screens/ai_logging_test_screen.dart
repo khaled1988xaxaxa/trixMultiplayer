@@ -124,20 +124,20 @@ class _AILoggingTestScreenState extends State<AILoggingTestScreen> {
     try {
       // Create test cards
       final testHand = [
-        const game_card.Card(suit: game_card.Suit.hearts, rank: game_card.Rank.ace),
-        const game_card.Card(suit: game_card.Suit.diamonds, rank: game_card.Rank.king),
-        const game_card.Card(suit: game_card.Suit.clubs, rank: game_card.Rank.queen),
+        game_card.Card(id: game_card.Card.generateId(game_card.Suit.hearts, game_card.Rank.ace), suit: game_card.Suit.hearts, rank: game_card.Rank.ace),
+        game_card.Card(id: game_card.Card.generateId(game_card.Suit.diamonds, game_card.Rank.king), suit: game_card.Suit.diamonds, rank: game_card.Rank.king),
+        game_card.Card(id: game_card.Card.generateId(game_card.Suit.clubs, game_card.Rank.queen), suit: game_card.Suit.clubs, rank: game_card.Rank.queen),
       ];
 
       final testAvailableCards = [
-        const game_card.Card(suit: game_card.Suit.hearts, rank: game_card.Rank.ace),
-        const game_card.Card(suit: game_card.Suit.diamonds, rank: game_card.Rank.king),
+        game_card.Card(id: game_card.Card.generateId(game_card.Suit.hearts, game_card.Rank.ace), suit: game_card.Suit.hearts, rank: game_card.Rank.ace),
+        game_card.Card(id: game_card.Card.generateId(game_card.Suit.diamonds, game_card.Rank.king), suit: game_card.Suit.diamonds, rank: game_card.Rank.king),
       ];
 
       final testCardsInTrick = [
         CardPlay(
           playerId: 'ai_1',
-          card: const game_card.Card(suit: game_card.Suit.spades, rank: game_card.Rank.jack),
+          card: game_card.Card(id: game_card.Card.generateId(game_card.Suit.spades, game_card.Rank.jack), suit: game_card.Suit.spades, rank: game_card.Rank.jack),
           position: 1,
           timestamp: DateTime.now(),
         ),
@@ -173,7 +173,7 @@ class _AILoggingTestScreenState extends State<AILoggingTestScreen> {
     try {
       // Create test AI recommendation
       final aiRecommendation = AIRecommendation(
-        recommendedCard: const game_card.Card(suit: game_card.Suit.hearts, rank: game_card.Rank.ace),
+        recommendedCard: game_card.Card(id: game_card.Card.generateId(game_card.Suit.hearts, game_card.Rank.ace), suit: game_card.Suit.hearts, rank: game_card.Rank.ace),
         confidence: 0.85,
         reasoning: 'Best strategic choice for current game state',
         alternativeOptions: {
@@ -186,7 +186,7 @@ class _AILoggingTestScreenState extends State<AILoggingTestScreen> {
       await provider.logCardPlay(
         gameContextId: contextId,
         playerId: 'human',
-        cardPlayed: const game_card.Card(suit: game_card.Suit.diamonds, rank: game_card.Rank.king),
+        cardPlayed: game_card.Card(id: game_card.Card.generateId(game_card.Suit.diamonds, game_card.Rank.king), suit: game_card.Suit.diamonds, rank: game_card.Rank.king),
         aiSuggestion: aiRecommendation,
         trickWon: true,
         pointsGained: 10,

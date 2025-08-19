@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/game_provider.dart';
 import '../models/game.dart';
 import '../models/player.dart';
 
@@ -22,22 +24,29 @@ class _ContractSelectionWidgetState extends State<ContractSelectionWidget> {
   TrexContract? selectedContract;
 
   @override
-  Widget build(BuildContext context) { // Build the contract selection widget
+  Widget build(BuildContext context) {
+    // Get game state from provider
+    final gameProvider = Provider.of<GameProvider>(context, listen: false);
+    final game = gameProvider.game;
+    final isKing = game != null && game.currentKing == PlayerPosition.south; // Assume south is the user
+    final isContractSelectionPhase = game != null && game.phase == GamePhase.contractSelection;
+    final canSelectContract = isKing && isContractSelectionPhase;
+
     // Ensure the widget does not exceed 70% of the screen height
     return ConstrainedBox(
-      constraints: BoxConstraints( // Set maximum height to 70% of screen height
-        maxHeight: MediaQuery.of(context).size.height * 0.7, // Max 70% of screen height
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.7,
       ),
       child: Container(
-        padding: const EdgeInsets.all(16), // Add padding around the container
-        margin: const EdgeInsets.symmetric(horizontal: 20), // Add horizontal margin
-        decoration: BoxDecoration( // Add a rounded border
+        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
           color: Colors.black.withOpacity(0.9),
           borderRadius: BorderRadius.circular(15),
           border: Border.all(color: Colors.orange, width: 2),
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min, // Use minimum size to fit content
+          mainAxisSize: MainAxisSize.min,
           children: [
             // Title
             const Text(
@@ -75,11 +84,15 @@ class _ContractSelectionWidgetState extends State<ContractSelectionWidget> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
-                    widget.onContractSelected(selectedContract!);
-                  },
+                  onPressed: canSelectContract
+                      ? () {
+                          widget.onContractSelected(selectedContract!);
+                        }
+                      : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color.fromARGB(255, 1, 179, 243),
+                    backgroundColor: canSelectContract
+                        ? const Color.fromARGB(255, 1, 179, 243)
+                        : Colors.grey,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
@@ -87,7 +100,9 @@ class _ContractSelectionWidgetState extends State<ContractSelectionWidget> {
                     ),
                   ),
                   child: Text(
-                    'Select ${selectedContract!.arabicName}',
+                    canSelectContract
+                        ? 'Select ${selectedContract!.arabicName}'
+                        : 'You are not the king or not contract selection phase',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,

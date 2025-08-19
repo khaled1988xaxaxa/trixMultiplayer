@@ -220,7 +220,7 @@ class TrixActionEncoder {
       
       if (rank == null) return null;
       
-      return Card(suit: suit, rank: rank);
+      return Card(id: Card.generateId(suit, rank), suit: suit, rank: rank);
     } catch (e) {
       return null;
     }

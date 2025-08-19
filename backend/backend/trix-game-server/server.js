@@ -341,12 +341,22 @@ class TrixGameServer {
 
     // Handle uncaught exceptions
     process.on('uncaughtException', (error) => {
-      Logger.error('❌ Uncaught Exception:', error);
+      Logger.error('❌ Uncaught Exception:', error && error.stack ? error.stack : error);
+      if (error && typeof error === 'object') {
+        try {
+          Logger.error('❌ Uncaught Exception (full object):', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        } catch (e) {}
+      }
       gracefulShutdown('UNCAUGHT_EXCEPTION');
     });
 
     process.on('unhandledRejection', (reason, promise) => {
-      Logger.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+      Logger.error('❌ Unhandled Rejection at:', promise, 'reason:', reason && reason.stack ? reason.stack : reason);
+      if (reason && typeof reason === 'object') {
+        try {
+          Logger.error('❌ Unhandled Rejection (full object):', JSON.stringify(reason, Object.getOwnPropertyNames(reason), 2));
+        } catch (e) {}
+      }
       gracefulShutdown('UNHANDLED_REJECTION');
     });
   }

@@ -201,6 +201,15 @@ class TrexGame {
     }
     
     const player = this.players.get(playerPosition);
+
+    // --- Start of new logging ---
+    if (player) {
+      const serverHand = player.hand.map(c => c.id).join(', ');
+      Logger.debug(`[Card Validation] Player: ${playerPosition}, Card: ${cardId}`);
+      Logger.debug(`[Card Validation] Server Hand: [${serverHand}]`);
+    }
+    // --- End of new logging ---
+
     if (!player || !player.hasCard(cardId)) {
       throw new Error('Player does not have this card');
     }
@@ -499,7 +508,7 @@ class TrexGame {
     
     // Add player data
     for (const [position, player] of this.players) {
-      const isCurrentPlayer = forPlayer === position;
+      const isCurrentPlayer = (forPlayer !== null && forPlayer === player.id) || (forPlayer === null && player.position === this.currentPlayer);
       state.players[position] = player.toJson(false, isCurrentPlayer);
     }
     

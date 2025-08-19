@@ -366,6 +366,8 @@ class MessageHandler {
       Logger.info(`🃏 Card ${cardId} played in room ${room.id}`);
       
     } catch (error) {
+      const { cardId } = data;
+      Logger.error(`❌ [Play Card Failed] for player ${sessionId}. Attempted to play card: ${cardId}. Reason: ${error.message}`);
       sendResponse({
         type: 'ERROR',
         error: {

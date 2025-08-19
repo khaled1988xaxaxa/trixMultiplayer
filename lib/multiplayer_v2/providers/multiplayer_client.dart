@@ -193,6 +193,9 @@ class MultiplayerClient with ChangeNotifier {
       case 'AI_REMOVED':
         _handleAIRemoved(message);
         break;
+      case 'AI_CARD_PLAYED':
+        _handleAICardPlayed(message);
+        break;
       case 'PLAYER_KICKED':
         _handlePlayerKicked(message);
         break;
@@ -202,11 +205,28 @@ class MultiplayerClient with ChangeNotifier {
       case 'GAME_STARTED':
         _handleGameStarted(message);
         break;
+      case 'CONTRACT_SELECTED':
+        _handleContractSelected(message);
+        break;
       case 'ERROR':
         _handleError(message);
         break;
       default:
         if (kDebugMode) print('🤷 Unhandled message type: ${message.type}');
+    }
+  }
+
+  void _handleContractSelected(ServerMessage message) {
+    if (kDebugMode) print('📝 CONTRACT_SELECTED received: ${message.data}');
+    final gameData = message.data['gameState'];
+    if (gameData != null) {
+      print('🔍 [DEBUG] Updating _currentGame with new gameState from server...');
+      _currentGame = ServerGame.fromJson(gameData);
+      print('🔍 [DEBUG] _currentGame.phase after update: \'${_currentGame?.phase}\'');
+      notifyListeners();
+      print('🔍 [DEBUG] notifyListeners() called after contract selection.');
+    } else {
+      print('❌ [DEBUG] No gameState found in CONTRACT_SELECTED message!');
     }
   }
 
@@ -304,8 +324,21 @@ class MultiplayerClient with ChangeNotifier {
     }
   }
 
+  void _handleAICardPlayed(ServerMessage message) {
+    final actionData = message.data['action'];
+    if (actionData != null) {
+      // Handle AI card play action
+      print('🤖 AI played card: ${actionData['cardId']} by ${actionData['player']}');
+      // Request updated game state from server
+      _websocket.sendMessage({
+        'type': 'GET_GAME_STATE',
+        'timestamp': DateTime.now().toIso8601String()
+      });
+    }
+  }
+
   void _handleAIRemoved(ServerMessage message) {
-    print('🤖 AI bot removed successfully');
+    print('🤖 AI bot removed');
     final roomData = message.data['room'];
     if (roomData != null) {
       _currentRoom = ServerRoom.fromJson(roomData);

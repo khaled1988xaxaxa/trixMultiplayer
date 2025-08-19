@@ -722,9 +722,12 @@ except Exception as e:
     final suitIndex = value ~/ 13;
     final rankValue = (value % 13) + 2;
     
+    final suit = Suit.values[suitIndex];
+    final rank = Rank.values.firstWhere((r) => r.value == rankValue);
     return Card(
-      suit: Suit.values[suitIndex],
-      rank: Rank.values.firstWhere((r) => r.value == rankValue),
+      id: Card.generateId(suit, rank),
+      suit: suit,
+      rank: rank,
     );
   }
   

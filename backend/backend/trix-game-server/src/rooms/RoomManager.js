@@ -9,9 +9,11 @@ const { AIPlayer } = require('../game/AIPlayer');
 const Logger = require('../utils/Logger');
 
 class GameRoom {
-  constructor(hostId, hostName, settings = {}) {
+  constructor(hostId, hostName, webSocketServer = null, settings = {}) {
     this.id = uuidv4();
     this.hostId = hostId;
+    this.hostName = hostName;
+    this.webSocketServer = webSocketServer;
     this.name = settings.name || `${hostName}'s Room`;
     this.settings = {
       maxPlayers: 4,
@@ -51,8 +53,22 @@ class GameRoom {
     if (availablePositions.length === 0) {
       throw new Error('No available positions');
     }
-    
-    const position = availablePositions[0];
+
+    let position;
+    // Always assign host to 'south' if available
+    if (sessionId === this.hostId) {
+      if (availablePositions.includes('south')) {
+        position = 'south';
+      } else {
+        // fallback if south is not available (should not happen for host join)
+        position = availablePositions[0];
+      }
+    } else {
+      // assign first available (not south if host not joining)
+      const filtered = availablePositions.filter(p => p !== 'south');
+      position = filtered.length > 0 ? filtered[0] : availablePositions[0];
+    }
+
     const playerInfo = {
       sessionId,
       name: playerName,
@@ -62,17 +78,17 @@ class GameRoom {
       joinedAt: new Date(),
       isConnected: true
     };
-    
+
     this.players.set(sessionId, playerInfo);
     this.lastActivity = new Date();
-    
+
     Logger.info(`👤 Player ${playerName} joined room ${this.id} at position ${position}`);
-    
+
     // Auto-fill with AI if enabled and room becomes full
     if (this.aiEnabled && this.canStartGame()) {
       this.fillWithAI();
     }
-    
+
     return playerInfo;
   }
 
@@ -306,6 +322,7 @@ class GameRoom {
     
     // Create game players
     const gamePlayers = [];
+    let hostPosition = null;
     for (const [sessionId, playerInfo] of this.players) {
       const gamePlayer = new Player(
         sessionId,
@@ -313,40 +330,48 @@ class GameRoom {
         playerInfo.position,
         playerInfo.isAI
       );
+      if (playerInfo.isHost) {
+        hostPosition = playerInfo.position;
+      }
       gamePlayers.push(gamePlayer);
     }
-    
-    // Determine first king (random for now)
-    const positions = Object.values(PlayerPosition);
-    const firstKing = positions[Math.floor(Math.random() * positions.length)];
-    
+
+    // Set first king to host's position (should be 'south')
+    const firstKing = hostPosition || 'south';
+
     // Create game
     this.game = new TrexGame(gamePlayers, firstKing);
     this.game.dealCards();
-    
+
     this.status = 'playing';
     this.lastActivity = new Date();
-    
+
     Logger.info(`🎮 Game started in room ${this.id} with first king: ${firstKing}`);
-    
+
     return this.game.getGameState();
   }
 
   // Game actions
   selectContract(sessionId, contract) {
     if (!this.game || this.status !== 'playing') {
+      Logger.error(`[selectContract] No active game. status=${this.status}`);
       throw new Error('No active game');
     }
-    
+
     const playerInfo = this.players.get(sessionId);
     if (!playerInfo) {
+      Logger.error(`[selectContract] Player not in room. sessionId=${sessionId}`);
       throw new Error('Player not in room');
     }
-    
+
+    Logger.info(`[selectContract] Attempt by ${playerInfo.name} (${playerInfo.position}) for contract=${contract}`);
+    Logger.info(`[selectContract] Game phase=${this.game.phase}, currentKing=${this.game.currentKing}, usedContracts=${Array.from(this.game.usedContracts).join(',')}`);
+
     if (!this.game.canSelectContract(playerInfo.position)) {
+      Logger.error(`[selectContract] Cannot select contract: phase=${this.game.phase}, currentKing=${this.game.currentKing}, player=${playerInfo.position}`);
       throw new Error('Cannot select contract');
     }
-    
+
     this.lastActivity = new Date();
     return this.game.selectContract(contract);
   }
@@ -441,7 +466,12 @@ class GameRoom {
       }
       
       if (aiMove.action === 'SELECT_CONTRACT') {
-        return this.game.selectContract(aiMove.contract);
+        const result = this.game.selectContract(aiMove.contract);
+        // Broadcast contract selection to all players
+        if (this.webSocketServer) {
+          this.webSocketServer.broadcastGameState(this.id, result);
+        }
+        return result;
       } else if (aiMove.action === 'PLAY_CARD') {
         const result = this.game.playCard(currentPlayerPosition, aiMove.cardId);
         
@@ -450,6 +480,17 @@ class GameRoom {
           this.status = 'finished';
         }
         
+        // Broadcast AI card play to all players
+        if (this.webSocketServer) {
+          this.webSocketServer.broadcastPlayerAction(this.id, {
+            type: 'AI_CARD_PLAYED',
+            player: currentPlayerPosition,
+            cardId: aiMove.cardId,
+            timestamp: new Date().toISOString()
+          });
+          
+          this.webSocketServer.broadcastGameState(this.id, result);
+        }
         return result;
       }
     } catch (error) {
@@ -502,14 +543,24 @@ class GameRoom {
 }
 
 class RoomManager {
-  constructor() {
+  // Process AI turns for all rooms
+  processAllAITurns() {
+    if (!this.rooms) return;
+    for (const room of this.rooms.values()) {
+      if (typeof room.processAITurn === 'function') {
+        room.processAITurn();
+      }
+    }
+  }
+  constructor(webSocketServer = null) {
     this.rooms = new Map(); // roomId -> GameRoom
     this.playerRooms = new Map(); // sessionId -> roomId
+    this.webSocketServer = webSocketServer;
     this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000); // 5 minutes
   }
 
   createRoom(hostSessionId, hostName, settings) {
-    const room = new GameRoom(hostSessionId, hostName, settings);
+    const room = new GameRoom(hostSessionId, hostName, this.webSocketServer, settings);
     this.rooms.set(room.id, room);
     
     // Add host as first player
@@ -590,47 +641,12 @@ class RoomManager {
     for (const roomId of toDelete) {
       const room = this.rooms.get(roomId);
       if (room) {
-        Logger.info(`🗑️ Cleaning up room: ${roomId}`);
-        
-        // Remove all player mappings
-        for (const [sessionId] of room.players) {
-          this.playerRooms.delete(sessionId);
-        }
-        
+        Logger.info(`🧹 Cleaning up inactive room ${roomId}`);
+        room.removeAllPlayers(); // Ensure all players are removed
         this.rooms.delete(roomId);
       }
     }
-    
-    if (toDelete.length > 0) {
-      Logger.info(`🧹 Cleaned up ${toDelete.length} rooms`);
-    }
-  }
-
-  // Process all AI turns
-  processAllAITurns() {
-    for (const room of this.rooms.values()) {
-      if (room.status === 'playing' && room.game && room.game.phase !== 'gameEnd' && room.game.phase !== 'finished') {
-        try {
-          room.processAITurn();
-        } catch (error) {
-          Logger.error(`❌ Error processing AI turn for room ${room.id}:`, error);
-        }
-      }
-    }
-  }
-
-  // Statistics
-  getStats() {
-    return {
-      totalRooms: this.rooms.size,
-      activeGames: Array.from(this.rooms.values()).filter(r => r.status === 'playing').length,
-      totalPlayers: Array.from(this.rooms.values()).reduce((sum, room) => sum + room.players.size, 0),
-      totalSpectators: Array.from(this.rooms.values()).reduce((sum, room) => sum + room.spectators.size, 0)
-    };
   }
 }
 
-module.exports = {
-  GameRoom,
-  RoomManager
-};
+module.exports = { RoomManager, GameRoom };

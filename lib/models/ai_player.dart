@@ -644,9 +644,12 @@ class AIPlayer extends Player {
     final rankValue = (value % 13) + 2;
     
     if (suitIndex >= 0 && suitIndex < Suit.values.length && rankValue >= 2 && rankValue <= 14) {
+      final suit = Suit.values[suitIndex];
+      final rank = Rank.values.firstWhere((r) => r.value == rankValue);
       return Card(
-        suit: Suit.values[suitIndex],
-        rank: Rank.values.firstWhere((r) => r.value == rankValue),
+        id: Card.generateId(suit, rank),
+        suit: suit,
+        rank: rank,
       );
     }
     

@@ -592,7 +592,7 @@ class TrixAI {
       print('🔢 Number of options: ${validCards.length}');
     }
     
-    Card kingOfHearts = Card(suit: Suit.hearts, rank: Rank.king);
+    Card kingOfHearts = Card(id: Card.generateId(Suit.hearts, Rank.king), suit: Suit.hearts, rank: Rank.king);
     
     // CRITICAL BUG PREVENTION: If King of Hearts is in hand and other options exist
     if (validCards.contains(kingOfHearts) && validCards.length > 1) {

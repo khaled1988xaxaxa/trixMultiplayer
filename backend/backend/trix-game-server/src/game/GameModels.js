@@ -96,7 +96,7 @@ class Card {
     return {
       suit: this.suit,
       rank: this.rank.name,
-      id: this.id
+      id: `${this.rank.shortName}${this.suit.charAt(0).toUpperCase()}`
     };
   }
 
@@ -209,7 +209,10 @@ class Player {
       handSize: this.hand.length
     };
 
-    if (includeHand || isCurrentPlayer) {
+    // Always include hand for the current player
+    if (isCurrentPlayer) {
+      playerData.hand = this.hand.map(card => card.toJson());
+    } else if (includeHand) {
       playerData.hand = this.hand.map(card => card.toJson());
     }
 
