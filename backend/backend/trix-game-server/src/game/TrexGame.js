@@ -275,7 +275,52 @@ class TrexGame {
     
     // Get valid moves for this player
     const validMoves = player.getValidMoves(this.currentTrick, this.currentContract);
-    return validMoves.some(validCard => validCard.id === cardId);
+    
+    // Enhanced validation logging
+    const isValid = validMoves.some(validCard => validCard.id === cardId);
+    Logger.debug(`🎯 [Move Validation] Player: ${playerPosition}, Card: ${cardId}, Valid: ${isValid}, Contract: ${this.currentContract}`);
+    
+    return isValid;
+  }
+  
+  // Contract enforcement - validate trick according to trump rules
+  validateTrickCompliance(trick, contract) {
+    if (!trick || trick.cards.size === 0) {
+      return true; // Empty trick is valid
+    }
+    
+    try {
+      const allPlayers = Array.from(this.players.values());
+      
+      for (const player of allPlayers) {
+        if (player.hand.length === 0) continue; // Skip players with no cards
+        
+        // Get all cards played in this trick by other players
+        const cardsInTrick = Array.from(trick.cards.values());
+        if (cardsInTrick.length === 0) continue;
+        
+        // Determine led suit
+        const ledSuit = cardsInTrick[0].suit;
+        
+        // Check if player followed suit when they should have
+        const playerCardsInTrick = trick.cards.get(player.position);
+        if (playerCardsInTrick) {
+          const playerCardSuit = playerCardsInTrick.suit;
+          
+          // Player must follow suit if possible
+          const hasLedSuit = player.hand.some(c => c.suit === ledSuit);
+          if (hasLedSuit && playerCardSuit !== ledSuit) {
+            Logger.warn(`⚠️ [Contract Validation] Player ${player.position} did not follow suit in trick`);
+            return false;
+          }
+        }
+      }
+      
+      return true;
+    } catch (e) {
+      Logger.error(`[Contract Validation] Error validating trick: ${e.message}`);
+      return true; // Don't block play on validation error
+    }
   }
 
   completeTrick() {
@@ -335,6 +380,22 @@ class TrexGame {
     const currentIndex = positions.indexOf(this.currentPlayer);
     const nextIndex = (currentIndex + 1) % positions.length;
     this.currentPlayer = positions[nextIndex];
+  }
+  
+  // Skip current player's turn (e.g., on timeout)
+  skipCurrentPlayer() {
+    if (this.phase !== GamePhase.PLAYING) {
+      throw new Error('Can only skip during playing phase');
+    }
+    
+    const currentPlayer = this.currentPlayer;
+    Logger.warn(`⏭️ Skipping turn for player ${currentPlayer}`);
+    
+    // Move to next player
+    this.advanceToNextPlayer();
+    
+    Logger.info(`➡️ Turn advanced to ${this.currentPlayer}`);
+    return this.getGameState();
   }
 
   isRoundComplete() {

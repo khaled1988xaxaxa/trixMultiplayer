@@ -13,6 +13,9 @@ import '../models/game_log_models.dart';
 import '../widgets/playing_card_widget.dart';
 import '../widgets/contract_selection_widget.dart';
 import '../widgets/ai_difficulty_indicator.dart';
+import '../widgets/optimized_card_fan.dart';
+import '../widgets/optimized_ui_components.dart';
+import '../utils/object_pool.dart';
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -32,6 +35,13 @@ class _GameScreenState extends State<GameScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndFixGameState();
     });
+  }
+
+  @override
+  void dispose() {
+    // Clear object pools to free memory
+    CacheManager.clearAll();
+    super.dispose();
   }
 
   @override
@@ -63,10 +73,10 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> _setupGameWithAIOpponents(Map<String, dynamic> arguments) async {
     final gameProvider = Provider.of<GameProvider>(context, listen: false);
     
-    // Don't create game if one already exists
+    // Reset any existing game to start fresh with AI opponents
     if (gameProvider.hasActiveGame) {
-      if (kDebugMode) print('🎮 Game already exists, skipping AI setup');
-      return;
+      if (kDebugMode) print('🎮 Resetting existing game to start new AI game');
+      gameProvider.resetGame();
     }
     
     try {
@@ -117,10 +127,10 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> _setupMultiplayerGame(Map<String, dynamic> arguments) async {
     final gameProvider = Provider.of<GameProvider>(context, listen: false);
     
-    // Don't create game if one already exists
+    // Reset any existing game to start fresh with multiplayer
     if (gameProvider.hasActiveGame) {
-      if (kDebugMode) print('🎮 Game already exists, skipping multiplayer setup');
-      return;
+      if (kDebugMode) print('🎮 Resetting existing game to start new multiplayer game');
+      gameProvider.resetGame();
     }
     
     try {
@@ -661,68 +671,15 @@ class _GameScreenState extends State<GameScreen> {
     // Determine layout based on position
     final isVertical = position == PlayerPosition.west || position == PlayerPosition.east;
     
-    return Container(
-      child: isVertical 
-          ? _buildVerticalCardStack(player.hand)
-          : _buildHorizontalCardStack(player.hand),
+    return OptimizedPlayerCardStack(
+      cards: player.hand,
+      isVertical: isVertical,
+      isSmall: true,
     );
   }
 
-  Widget _buildVerticalCardStack(List<game_card.Card> hand) {
-    final cardCount = hand.length;
-    final displayCount = cardCount.clamp(0, 13);
-    
-    return SizedBox(
-      width: 48,
-      height: 60 + (displayCount * 12), // Increased spacing from 3 to 8
-      child: Stack(
-        children: List.generate(displayCount, (index) {
-          final card = hand[index];
-          return Positioned(
-            top: index * 12.0, // Increased spacing from 5.0 to 8.0
-            child: Container(
-              width: 25,
-              height: 40,
-              child: PlayingCardWidget(
-                card: card,
-                isSmall: true,
-                useCardImages: true,
-                isCompact: true,
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _buildHorizontalCardStack(List<game_card.Card> hand) {
-    final cardCount = hand.length;
-    final displayCount = cardCount.clamp(0, 13);
-    
-    return SizedBox(
-      width: 50 + (displayCount * 12), // Increased spacing from 3 to 8
-      height: 35,
-      child: Stack(
-        children: List.generate(displayCount, (index) {
-          final card = hand[index];
-          return Positioned(
-            left: index * 12.0, // Increased spacing from 5.0 to 8.0
-            child: Container(
-              width: 35,
-              height: 40,
-              child: PlayingCardWidget(
-                card: card,
-                isSmall: true,
-                useCardImages: true,
-                isCompact: true,
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
+  // Removed _buildVerticalCardStack and _buildHorizontalCardStack methods
+  // These are now handled by OptimizedPlayerCardStack widget
 
   Widget _buildCenterGameArea(BuildContext context, TrexGame game) {
     return Center(
@@ -1484,46 +1441,14 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Widget _buildCardsFanLayout(BuildContext context, List<game_card.Card> cards) {
-    if (cards.isEmpty) return const SizedBox.shrink();
-
-    // Overlapping (stacked) layout: cards overlap horizontally
-    const double cardWidth = 48.0; // Width of each card
-    const double overlap = 23.0; // The higher the value, the less overlap
-    final totalWidth = cards.length > 1
-        ? cardWidth + (cards.length - 1) * (cardWidth - overlap)
-        : cardWidth;
-
-    return Consumer<GameProvider>(
-      builder: (context, gameProvider, child) {
-        final shouldHighlight = gameProvider.shouldHighlightCards;
-
-        return SizedBox(
-          height: 100,
-          width: totalWidth,
-          child: Stack(
-            children: cards.asMap().entries.map((entry) {
-              final index = entry.key;
-              final card = entry.value;
-              final isCardPlayable = _isCardPlayable(context, card);
-
-              return Positioned(
-                left: index * (cardWidth - overlap),
-                child: GestureDetector(
-                  onTap: () => _playCard(context, card),
-                  child: PlayingCardWidget(
-                    card: card,
-                    isPlayable: isCardPlayable,
-                    isSelected: false,
-                    useCardImages: true,
-                    isCompact: false,
-                    showValidityHighlight: shouldHighlight,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        );
-      },
+    return OptimizedCardFan(
+      cards: cards,
+      onCardTap: (card) => _playCard(context, card),
+      isCardPlayable: (card) => _isCardPlayable(context, card),
+      cardWidth: 48.0,
+      overlap: 23.0,
+      useCardImages: true,
+      isCompact: false,
     );
   }
 

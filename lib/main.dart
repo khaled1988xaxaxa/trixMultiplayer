@@ -121,10 +121,26 @@ class TrixApp extends StatelessWidget {
         ),
 
         home: const HomeScreen(),
-        routes: {
-          '/game': (context) => const GameScreen(),
-          '/ai-game-setup': (context) => const AIGameSetupScreen(),
-          '/logging_settings': (context) => const LoggingSettingsScreen(),
+        onGenerateRoute: (settings) {
+          switch (settings.name) {
+            case '/game':
+              return MaterialPageRoute(
+                builder: (context) => const GameScreen(),
+                settings: settings, // This ensures arguments are passed
+              );
+            case '/ai-game-setup':
+              return MaterialPageRoute(
+                builder: (context) => const AIGameSetupScreen(),
+                settings: settings,
+              );
+            case '/logging_settings':
+              return MaterialPageRoute(
+                builder: (context) => const LoggingSettingsScreen(),
+                settings: settings,
+              );
+            default:
+              return null;
+          }
         },
       ),
     );

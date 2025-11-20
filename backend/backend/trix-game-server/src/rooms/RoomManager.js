@@ -7,6 +7,7 @@ const TrexGame = require('../game/TrexGame');
 const { Player, PlayerPosition } = require('../game/GameModels');
 const { AIPlayer } = require('../game/AIPlayer');
 const Logger = require('../utils/Logger');
+const config = require('../config/gameSettings');
 
 class GameRoom {
   constructor(hostId, hostName, webSocketServer = null, settings = {}) {
@@ -16,17 +17,13 @@ class GameRoom {
     this.webSocketServer = webSocketServer;
     this.name = settings.name || `${hostName}'s Room`;
     this.settings = {
-      maxPlayers: 4,
-      isPrivate: false,
-      aiDifficulty: 'medium',
-      allowSpectators: true,
-      gameSpeed: 'normal', // slow, normal, fast
+      ...config.DEFAULT_ROOM_SETTINGS,
       ...settings
     };
     
     this.players = new Map(); // sessionId -> PlayerInfo
     this.spectators = new Map(); // sessionId -> SpectatorInfo
-    this.status = 'waiting'; // waiting, playing, finished
+    this.status = config.ROOM_STATUS.WAITING;
     this.game = null;
     this.createdAt = new Date();
     this.lastActivity = new Date();
@@ -35,17 +32,34 @@ class GameRoom {
     this.aiPlayers = new Map(); // position -> AIPlayer
     this.aiEnabled = true;
     
+    // Metrics
+    this.metrics = {
+      createdAt: new Date(),
+      gamesStarted: 0,
+      totalPlayTime: 0,
+      turnCount: 0,
+      aiTurnsProcessed: 0,
+      averageTurnTime: 0,
+    };
+    
+    // Turn timeout
+    this.currentTurnStartTime = null;
+    this.turnTimeoutId = null;
+    
+    // Game history
+    this.trickHistory = [];
+    
     Logger.info(`🏠 Room created: ${this.id} by ${hostName}`);
   }
 
   // Player management
   addPlayer(sessionId, playerName, isAI = false) {
     if (this.players.size >= this.settings.maxPlayers) {
-      throw new Error('Room is full');
+      throw new Error(config.ERROR_MESSAGE.ROOM_FULL);
     }
     
-    if (this.status !== 'waiting') {
-      throw new Error('Game is already in progress');
+    if (this.status !== config.ROOM_STATUS.WAITING) {
+      throw new Error(config.ERROR_MESSAGE.GAME_IN_PROGRESS);
     }
     
     // Assign position
@@ -337,18 +351,62 @@ class GameRoom {
     }
 
     // Set first king to host's position (should be 'south')
-    const firstKing = hostPosition || 'south';
+    const firstKing = hostPosition || config.HOST_POSITION;
 
     // Create game
     this.game = new TrexGame(gamePlayers, firstKing);
     this.game.dealCards();
 
-    this.status = 'playing';
+    this.status = config.ROOM_STATUS.PLAYING;
     this.lastActivity = new Date();
+    this.metrics.gamesStarted++;
+    this.currentTurnStartTime = Date.now();
+    this.startTurnTimer();
 
     Logger.info(`🎮 Game started in room ${this.id} with first king: ${firstKing}`);
 
     return this.game.getGameState();
+  }
+
+  // Turn timeout handling
+  startTurnTimer() {
+    this.clearTurnTimer();
+    
+    if (this.status !== config.ROOM_STATUS.PLAYING) return;
+    
+    this.turnTimeoutId = setTimeout(() => {
+      const currentPlayer = this.game?.currentPlayer;
+      Logger.warn(`⏰ Turn timeout for player ${currentPlayer} in room ${this.id}`);
+      
+      try {
+        // Skip the current player's turn
+        if (this.game && this.game.phase === config.PHASE.PLAYING) {
+          // Move to next player
+          this.game.skipCurrentPlayer();
+          Logger.info(`⏭️ Skipped turn for player ${currentPlayer}`);
+          
+          // Broadcast update
+          if (this.webSocketServer) {
+            this.webSocketServer.broadcastGameState(this.id, this.game.getGameState());
+          }
+          
+          // Process AI chain if needed
+          this.processAIChain();
+        }
+      } catch (e) {
+        Logger.error(`Error handling turn timeout: ${e.message}`);
+      }
+      
+      // Restart timer for next player
+      this.startTurnTimer();
+    }, config.TURN_TIMEOUT_MS);
+  }
+  
+  clearTurnTimer() {
+    if (this.turnTimeoutId) {
+      clearTimeout(this.turnTimeoutId);
+      this.turnTimeoutId = null;
+    }
   }
 
   // Game actions
@@ -377,137 +435,272 @@ class GameRoom {
   }
 
   playCard(sessionId, cardId) {
-    if (!this.game || this.status !== 'playing') {
+    if (!this.game || this.status !== config.ROOM_STATUS.PLAYING) {
       throw new Error('No active game');
     }
     
     const playerInfo = this.players.get(sessionId);
     if (!playerInfo) {
-      throw new Error('Player not in room');
+      throw new Error(config.ERROR_MESSAGE.PLAYER_NOT_FOUND);
     }
     
     if (!this.game.isPlayerTurn(playerInfo.position)) {
-      throw new Error('Not player\'s turn');
+      throw new Error(config.ERROR_MESSAGE.NOT_YOUR_TURN);
     }
     
     this.lastActivity = new Date();
+    this.metrics.turnCount++;
+    
     const gameState = this.game.playCard(playerInfo.position, cardId);
     
+    // Record turn time
+    if (this.currentTurnStartTime) {
+      const turnTime = Date.now() - this.currentTurnStartTime;
+      this.metrics.averageTurnTime = 
+        (this.metrics.averageTurnTime * (this.metrics.turnCount - 1) + turnTime) / this.metrics.turnCount;
+      this.currentTurnStartTime = Date.now();
+    }
+    
     // Check if game ended
-    if (this.game.phase === 'gameEnd') {
-      this.status = 'finished';
+    if (this.game.phase === config.PHASE.GAME_END) {
+      this.status = config.ROOM_STATUS.FINISHED;
+      this.metrics.totalPlayTime = Date.now() - this.metrics.createdAt;
+      this.clearTurnTimer();
+    } else {
+      // Restart timer for next player
+      this.startTurnTimer();
+      
+      // Process AI chain if needed
+      setImmediate(() => this.processAIChain());
     }
     
     return gameState;
   }
 
-  // AI processing
-  processAITurn() {
-    if (!this.game || this.status !== 'playing') {
+  // AI processing - Event-driven approach
+  async processAIChain() {
+    if (!this.game || this.status !== config.ROOM_STATUS.PLAYING) {
       return null;
     }
     
-    // Check if game is in a valid state for AI processing
-    if (this.game.phase === 'gameEnd' || this.game.phase === 'finished') {
+    if (this.game.phase === config.PHASE.GAME_END || this.game.phase === 'finished') {
+      return null;
+    }
+    
+    const startTime = Date.now();
+    let processedMoves = 0;
+    
+    try {
+      // Process AI turns until a human player's turn or timeout
+      while (this.game && this.status === config.ROOM_STATUS.PLAYING) {
+        const currentPlayer = this.game.currentPlayer;
+        if (!currentPlayer) break;
+        
+        const aiPlayer = this.aiPlayers.get(currentPlayer);
+        if (!aiPlayer) {
+          // Current player is human, stop
+          Logger.debug(`[AI] Stopping AI chain: Current player ${currentPlayer} is human`);
+          break;
+        }
+        
+        // Check timeout
+        if (Date.now() - startTime > config.AI_CHAIN_PROCESS_TIMEOUT_MS) {
+          Logger.warn(`[AI] AI chain timeout in room ${this.id}`);
+          break;
+        }
+        
+        // Process this AI move
+        const result = this.processAISingleTurn();
+        if (result) {
+          processedMoves++;
+          
+          // Broadcast update
+          if (this.webSocketServer) {
+            this.webSocketServer.broadcastPlayerAction(this.id, {
+              type: config.MESSAGE_TYPE.AI_CARD_PLAYED,
+              player: currentPlayer,
+              cardId: result.lastCardPlayed,
+              timestamp: new Date().toISOString()
+            });
+            this.webSocketServer.broadcastGameState(this.id, this.game.getGameState());
+          }
+          
+          // Delay between AI moves
+          await this.delay(config.AI_MOVE_DELAY_MS);
+        } else {
+          break;
+        }
+      }
+      
+      Logger.debug(`[AI] AI chain processed ${processedMoves} moves in ${Date.now() - startTime}ms`);
+      return processedMoves > 0 ? this.game.getGameState() : null;
+    } catch (e) {
+      Logger.error(`[AI] Error in AI chain: ${e.message}`);
+      return null;
+    }
+  }
+
+  // Single AI turn processing
+  processAISingleTurn() {
+    if (!this.game || this.status !== config.ROOM_STATUS.PLAYING) {
+      Logger.debug(`[AI] Skipping processAISingleTurn: No active game. Room=${this.id}`);
+      return null;
+    }
+    
+    if (this.game.phase === config.PHASE.GAME_END) {
+      Logger.debug(`[AI] Skipping processAISingleTurn: Game ended. Room=${this.id}`);
       return null;
     }
     
     const currentPlayerPosition = this.game.currentPlayer;
-    
-    // Validate current player
     if (!currentPlayerPosition) {
+      Logger.debug(`[AI] Skipping processAISingleTurn: No current player. Room=${this.id}`);
       return null;
     }
     
     const aiPlayer = this.aiPlayers.get(currentPlayerPosition);
-    
     if (!aiPlayer) {
-      return null; // Not an AI player's turn
+      Logger.debug(`[AI] Skipping processAISingleTurn: Current player is not AI. Room=${this.id}, Position=${currentPlayerPosition}`);
+      return null;
     }
     
     try {
-      // Guard: if phase requires contract selection but current player isn't king, skip
-      if (this.game.phase === 'contractSelection' && this.game.currentKing !== currentPlayerPosition) {
+      Logger.info(`[AI] Processing single AI turn: Room=${this.id}, Position=${currentPlayerPosition}`);
+      
+      if (this.game.phase === config.PHASE.CONTRACT_SELECTION && this.game.currentKing !== currentPlayerPosition) {
+        Logger.debug(`[AI] Skipping contract selection: Not king`);
         return null;
       }
-
-      // Guard: if phase is playing but it's not current player's turn, skip (race safety)
-      if (this.game.phase === 'playing' && this.game.currentPlayer !== currentPlayerPosition) {
+      
+      if (this.game.phase === config.PHASE.PLAYING && this.game.currentPlayer !== currentPlayerPosition) {
+        Logger.debug(`[AI] Skipping play card: Not current player's turn`);
         return null;
       }
-
-      // IMPORTANT: pass currentPlayerPosition so gameState includes that AI player's hand
+      
       const gameState = this.game.getGameState(currentPlayerPosition);
-      
-      // Additional validation
       if (!gameState || !gameState.players || !gameState.players[currentPlayerPosition]) {
-        Logger.warn(`⚠️ Invalid game state for AI player ${currentPlayerPosition} in room ${this.id}`);
+        Logger.warn(`[AI] Invalid game state for AI player ${currentPlayerPosition}`);
         return null;
       }
       
-      // Fallback: ensure hand exists
+      // Reconstruct hand if missing
       if (!gameState.players[currentPlayerPosition].hand) {
         try {
           const internalPlayer = this.game.players.get(currentPlayerPosition);
-            if (internalPlayer) {
-              gameState.players[currentPlayerPosition].hand = internalPlayer.hand.map(c => c.toJson());
-              Logger.warn(`⚠️ Reconstructed missing hand for AI ${currentPlayerPosition} in room ${this.id}`);
-            }
+          if (internalPlayer) {
+            gameState.players[currentPlayerPosition].hand = internalPlayer.hand.map(c => c.toJson());
+          }
         } catch (e) {
-          Logger.error(`❌ Failed to reconstruct hand for ${currentPlayerPosition}:`, e);
+          Logger.error(`[AI] Failed to reconstruct hand: ${e.message}`);
         }
       }
-
+      
       const aiMove = aiPlayer.makeMove(gameState, currentPlayerPosition);
+      Logger.info(`[AI] AI move result:`, aiMove);
       
       if (!aiMove || !aiMove.action) {
-        Logger.warn(`⚠️ AI player ${currentPlayerPosition} returned invalid move in room ${this.id}`);
+        Logger.warn(`[AI] AI returned invalid move`);
         return null;
       }
       
       if (aiMove.action === 'SELECT_CONTRACT') {
+        Logger.info(`[AI] AI selecting contract: ${aiMove.contract}`);
         const result = this.game.selectContract(aiMove.contract);
-        // Broadcast contract selection to all players
-        if (this.webSocketServer) {
-          this.webSocketServer.broadcastGameState(this.id, result);
-        }
-        return result;
+        return { ...result, lastCardPlayed: aiMove.contract };
       } else if (aiMove.action === 'PLAY_CARD') {
+        Logger.info(`[AI] AI playing card: ${aiMove.cardId}`);
         const result = this.game.playCard(currentPlayerPosition, aiMove.cardId);
         
-        // Check if game ended
-        if (this.game.phase === 'gameEnd') {
-          this.status = 'finished';
+        this.metrics.aiTurnsProcessed++;
+        
+        // Record trick if completed
+        if (result.trickCompleted) {
+          this.trickHistory.push({
+            number: this.trickHistory.length + 1,
+            winner: result.trickWinner,
+            timestamp: new Date()
+          });
         }
         
-        // Broadcast AI card play to all players
-        if (this.webSocketServer) {
-          this.webSocketServer.broadcastPlayerAction(this.id, {
-            type: 'AI_CARD_PLAYED',
-            player: currentPlayerPosition,
-            cardId: aiMove.cardId,
-            timestamp: new Date().toISOString()
-          });
-          
-          this.webSocketServer.broadcastGameState(this.id, result);
+        if (this.game.phase === config.PHASE.GAME_END) {
+          this.status = config.ROOM_STATUS.FINISHED;
+          this.metrics.totalPlayTime = Date.now() - this.metrics.createdAt;
+          this.clearTurnTimer();
         }
-        return result;
+        
+        return { ...result, lastCardPlayed: aiMove.cardId };
       }
     } catch (error) {
-      // More detailed error logging
-      Logger.error(`❌ AI error in room ${this.id} for player ${currentPlayerPosition || 'unknown'}:`, {
-        error: error.message || error,
-        stack: error.stack,
-        gamePhase: this.game?.phase,
-        currentPlayer: this.game?.currentPlayer,
-        roomStatus: this.status
+      Logger.error(`[AI] Error processing AI turn:`, {
+        error: error.message,
+        room: this.id,
+        player: currentPlayerPosition,
+        phase: this.game?.phase
       });
     }
     
     return null;
   }
 
-  // State management
+  // Fallback processAITurn for compatibility
+  processAITurn() {
+    return this.processAISingleTurn();
+  }
+
+  // Utility: Delay helper
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Remove all players and clean up
+  removeAllPlayers() {
+    this.clearTurnTimer();
+    this.players.clear();
+    this.spectators.clear();
+    this.aiPlayers.clear();
+    Logger.info(`🧹 Cleared all players from room ${this.id}`);
+  }
+
+  // Spectator support
+  handleSpectatorMessage(spectatorId, message) {
+    const spectator = this.spectators.get(spectatorId);
+    if (!spectator) {
+      Logger.warn(`Spectator ${spectatorId} not found in room ${this.id}`);
+      return null;
+    }
+    
+    if (message.type === 'WATCH_GAME') {
+      // Send full game state to spectator
+      return this.game ? this.game.getGameState() : null;
+    }
+    
+    if (message.type === 'GET_TRICKS') {
+      // Send trick history to spectator
+      return {
+        tricks: this.trickHistory,
+        totalTricks: this.trickHistory.length
+      };
+    }
+    
+    return null;
+  }
+
+  // Metrics and diagnostics
+  getMetrics() {
+    return {
+      roomId: this.id,
+      status: this.status,
+      players: this.players.size,
+      spectators: this.spectators.size,
+      aiCount: this.aiPlayers.size,
+      phase: this.game?.phase,
+      currentPlayer: this.game?.currentPlayer,
+      metrics: this.metrics,
+      trickCount: this.trickHistory.length,
+      averageTurnTime: Math.round(this.metrics.averageTurnTime),
+      totalPlayTime: this.metrics.totalPlayTime
+    };
+  }
   getRoomState(forSessionId = null) {
     const state = {
       id: this.id,
@@ -543,20 +736,31 @@ class GameRoom {
 }
 
 class RoomManager {
-  // Process AI turns for all rooms
-  processAllAITurns() {
-    if (!this.rooms) return;
-    for (const room of this.rooms.values()) {
-      if (typeof room.processAITurn === 'function') {
-        room.processAITurn();
-      }
-    }
-  }
   constructor(webSocketServer = null) {
     this.rooms = new Map(); // roomId -> GameRoom
     this.playerRooms = new Map(); // sessionId -> roomId
     this.webSocketServer = webSocketServer;
+    
     this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000); // 5 minutes
+    
+    // Fallback AI interval (for rooms without active players)
+    this.aiInterval = setInterval(() => {
+      const start = Date.now();
+      let aiMoves = 0;
+      
+      if (this.rooms) {
+        for (const room of this.rooms.values()) {
+          if (typeof room.processAITurn === 'function') {
+            const result = room.processAITurn();
+            if (result) aiMoves++;
+          }
+        }
+      }
+      
+      Logger.debug(`[AI] Fallback AI interval: ${aiMoves} moves in ${Date.now() - start}ms`);
+    }, config.AI_PROCESS_INTERVAL_MS);
+    
+    Logger.info(`✅ RoomManager initialized`);
   }
 
   createRoom(hostSessionId, hostName, settings) {
@@ -646,6 +850,34 @@ class RoomManager {
         this.rooms.delete(roomId);
       }
     }
+  }
+
+  // Process AI turns for all active rooms
+  processAllAITurns() {
+    const start = Date.now();
+    let totalAIMoves = 0;
+
+    if (!this.rooms || this.rooms.size === 0) {
+      return { processed: 0, time: 0 };
+    }
+
+    for (const room of this.rooms.values()) {
+      if (room && room.isActive && room.isActive()) {
+        try {
+          // Use event-driven AI processing if available
+          if (typeof room.processAIChain === 'function') {
+            // processAIChain is async but we fire and forget here
+            // The actual processing happens via setImmediate in playCard
+            totalAIMoves++;
+          }
+        } catch (error) {
+          Logger.error(`Error processing AI for room ${room.id}: ${error.message}`);
+        }
+      }
+    }
+
+    const duration = Date.now() - start;
+    return { processed: totalAIMoves, time: duration };
   }
 
   // Get server statistics

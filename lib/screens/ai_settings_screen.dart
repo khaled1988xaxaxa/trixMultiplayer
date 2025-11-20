@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '../utils/ai_config.dart';
 import '../providers/game_provider.dart';
+import 'ai_performance_settings_screen.dart';
 
 class AISettingsScreen extends StatefulWidget {
   const AISettingsScreen({super.key});
@@ -735,7 +736,33 @@ class _AISettingsScreenState extends State<AISettingsScreen> {
                 ],
               ],
 
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
+
+              // Advanced Performance Settings Button
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AIPerformanceSettingsScreen(),
+                      ),
+                    );
+                  },
+                  icon: Icon(Icons.speed, size: 18, color: Colors.blue[300]),
+                  label: Text(
+                    'Advanced Performance Settings',
+                    style: TextStyle(color: Colors.blue[300]),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: Colors.blue[600]!),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
 
               // Save Button
               SizedBox(

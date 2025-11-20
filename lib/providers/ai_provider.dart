@@ -4,6 +4,7 @@ import '../models/ai_player.dart';
 import '../models/player.dart';
 import '../services/ai_manager.dart';
 import '../services/elite_ai_service.dart';
+import '../utils/ai_processing_optimizer.dart';
 
 class AIProvider extends ChangeNotifier {
   final AIManager _aiManager = AIManager();
@@ -60,6 +61,9 @@ class AIProvider extends ChangeNotifier {
       // Initialize Elite AI service for Claude Sonnet and ChatGPT models
       await _eliteAIService.initialize();
       
+      // Initialize AI processing optimizer for improved performance
+      AIProcessingOptimizer().initialize();
+      
       _isInitialized = true;
       
       // Load saved preferences
@@ -67,6 +71,7 @@ class AIProvider extends ChangeNotifier {
       
       if (kDebugMode) {
         print('✅ AI Provider initialized successfully');
+        print('🚀 AI Processing Optimizer initialized');
       }
     } catch (e) {
       _setError('Failed to initialize AI system: $e');
@@ -349,6 +354,7 @@ class AIProvider extends ChangeNotifier {
   void reset() {
     endGameSession();
     _aiManager.cleanup();
+    AIProcessingOptimizer().dispose();
     _isInitialized = false;
     _playerGamesPlayed = 0;
     _playerGamesWon = 0;
@@ -360,6 +366,7 @@ class AIProvider extends ChangeNotifier {
   @override
   void dispose() {
     endGameSession();
+    AIProcessingOptimizer().dispose();
     super.dispose();
   }
 }

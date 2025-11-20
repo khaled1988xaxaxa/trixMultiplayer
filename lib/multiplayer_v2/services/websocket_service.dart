@@ -1,8 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter/foundation.dart';
 import '../models/server_models.dart';
+
+enum ConnectionState {
+  disconnected,
+  connecting,
+  connected,
+  reconnecting,
+  failed
+}
 
 class WebSocketService {
   static final WebSocketService _instance = WebSocketService._internal();
@@ -11,45 +20,61 @@ class WebSocketService {
 
   WebSocketChannel? _channel;
   StreamController<ServerMessage>? _messageController;
+  StreamController<ConnectionState>? _connectionStateController;
   String? _sessionId;
-  String? _playerName; // Store player name for convenience methods
-  bool _isConnected = false;
+  String? _playerName;
+  String? _serverUrl; // Store server URL for reconnection
+  ConnectionState _connectionState = ConnectionState.disconnected;
   Timer? _heartbeatTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 5;
-  static const Duration heartbeatInterval = Duration(seconds: 30);
-  static const Duration reconnectDelay = Duration(seconds: 3);
+  DateTime? _lastHeartbeatResponse;
+  bool _manualDisconnect = false;
+  
+  static const int maxReconnectAttempts = 10;
+  static const Duration heartbeatInterval = Duration(seconds: 20);
+  static const Duration heartbeatTimeout = Duration(seconds: 10);
+  static const Duration baseReconnectDelay = Duration(seconds: 1);
+  static const Duration maxReconnectDelay = Duration(seconds: 30);
 
   String? get sessionId => _sessionId;
-  bool get isConnected => _isConnected;
+  bool get isConnected => _connectionState == ConnectionState.connected;
+  ConnectionState get connectionState => _connectionState;
   Stream<ServerMessage> get messageStream => _messageController?.stream ?? const Stream.empty();
+  Stream<ConnectionState> get connectionStateStream => _connectionStateController?.stream ?? const Stream.empty();
 
   Future<bool> connect(String serverUrl, {String? playerName}) async {
     try {
       if (kDebugMode) print('🔌 Connecting to WebSocket: $serverUrl');
       
-      // Store player name for later use
+      // Store connection details for reconnection
+      _serverUrl = serverUrl;
       _playerName = playerName;
+      _manualDisconnect = false;
+      
+      _setConnectionState(ConnectionState.connecting);
       
       // Close existing connection if any
-      await disconnect();
+      await _closeConnection();
       
       // Create new connection
       _channel = WebSocketChannel.connect(Uri.parse(serverUrl));
-      _messageController = StreamController<ServerMessage>.broadcast();
+      _messageController ??= StreamController<ServerMessage>.broadcast();
+      _connectionStateController ??= StreamController<ConnectionState>.broadcast();
       
       // Listen to messages
       _channel!.stream.listen(
         _handleMessage,
         onError: _handleError,
         onDone: _handleDisconnection,
+        cancelOnError: false,
       );
       
       // Wait for connection confirmation or timeout
       final completer = Completer<bool>();
-      Timer(const Duration(seconds: 5), () {
+      Timer(const Duration(seconds: 10), () {
         if (!completer.isCompleted) {
+          _setConnectionState(ConnectionState.failed);
           completer.complete(false);
         }
       });
@@ -62,8 +87,9 @@ class WebSocketService {
           
           if (sessionId != null) {
             _sessionId = sessionId;
-            _isConnected = true;
+            _setConnectionState(ConnectionState.connected);
             _reconnectAttempts = 0;
+            _lastHeartbeatResponse = DateTime.now();
             _startHeartbeat();
             
             if (!completer.isCompleted) {
@@ -80,30 +106,36 @@ class WebSocketService {
       
     } catch (e) {
       if (kDebugMode) print('❌ WebSocket connection error: $e');
+      _setConnectionState(ConnectionState.failed);
       return false;
     }
   }
 
   Future<void> disconnect() async {
-    if (kDebugMode) print('🔌 Disconnecting WebSocket');
+    if (kDebugMode) print('🔌 Manually disconnecting WebSocket');
     
-    _isConnected = false;
-    _sessionId = null;
+    _manualDisconnect = true;
     _reconnectAttempts = 0;
     
+    await _closeConnection();
+    _setConnectionState(ConnectionState.disconnected);
+  }
+  
+  Future<void> _closeConnection() async {
     _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     
     await _channel?.sink.close();
     _channel = null;
     
-    await _messageController?.close();
-    _messageController = null;
+    _sessionId = null;
   }
 
   void sendMessage(Map<String, dynamic> message) {
-    if (!_isConnected || _channel == null) {
-      if (kDebugMode) print('❌ Cannot send message: not connected');
+    if (_connectionState != ConnectionState.connected || _channel == null) {
+      if (kDebugMode) print('❌ Cannot send message: not connected (state: $_connectionState)');
       return;
     }
 
@@ -119,6 +151,7 @@ class WebSocketService {
       
     } catch (e) {
       if (kDebugMode) print('❌ Error sending message: $e');
+      _handleError(e);
     }
   }
 
@@ -176,6 +209,14 @@ class WebSocketService {
     return _playerName ?? 'Player${DateTime.now().millisecondsSinceEpoch % 1000}';
   }
 
+  void _setConnectionState(ConnectionState newState) {
+    if (_connectionState != newState) {
+      _connectionState = newState;
+      _connectionStateController?.add(newState);
+      if (kDebugMode) print('🔄 Connection state changed to: $newState');
+    }
+  }
+
   void _handleMessage(dynamic rawMessage) {
     try {
       final messageData = jsonDecode(rawMessage);
@@ -185,7 +226,7 @@ class WebSocketService {
       
       // Handle special system messages
       if (message.type == 'PONG') {
-        // Heartbeat response - just log
+        _lastHeartbeatResponse = DateTime.now();
         return;
       }
       
@@ -198,21 +239,35 @@ class WebSocketService {
 
   void _handleError(error) {
     if (kDebugMode) print('❌ WebSocket error: $error');
-    _isConnected = false;
+    if (_connectionState == ConnectionState.connected) {
+      _setConnectionState(ConnectionState.reconnecting);
+    }
     _attemptReconnect();
   }
 
   void _handleDisconnection() {
     if (kDebugMode) print('🔌 WebSocket disconnected');
-    _isConnected = false;
     _heartbeatTimer?.cancel();
-    _attemptReconnect();
+    _heartbeatTimer = null;
+    
+    if (!_manualDisconnect && _connectionState == ConnectionState.connected) {
+      _setConnectionState(ConnectionState.reconnecting);
+      _attemptReconnect();
+    }
   }
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(heartbeatInterval, (timer) {
-      if (_isConnected) {
+      if (_connectionState == ConnectionState.connected) {
+        // Check if last heartbeat response was too long ago
+        if (_lastHeartbeatResponse != null && 
+            DateTime.now().difference(_lastHeartbeatResponse!) > heartbeatTimeout) {
+          if (kDebugMode) print('💔 Heartbeat timeout detected');
+          _handleError('Heartbeat timeout');
+          return;
+        }
+        
         sendMessage({'type': 'PING', 'data': {}});
       } else {
         timer.cancel();
@@ -221,21 +276,51 @@ class WebSocketService {
   }
 
   void _attemptReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts) {
-      if (kDebugMode) print('❌ Max reconnection attempts reached');
+    if (_manualDisconnect || _reconnectAttempts >= maxReconnectAttempts) {
+      if (_reconnectAttempts >= maxReconnectAttempts) {
+        if (kDebugMode) print('❌ Max reconnection attempts reached');
+        _setConnectionState(ConnectionState.failed);
+      }
       return;
     }
 
     _reconnectAttempts++;
     if (kDebugMode) print('🔄 Attempting reconnect $_reconnectAttempts/$maxReconnectAttempts');
     
+    // Calculate exponential backoff delay
+    final delayMs = min(
+      baseReconnectDelay.inMilliseconds * pow(2, _reconnectAttempts - 1),
+      maxReconnectDelay.inMilliseconds
+    ).toInt();
+    final delay = Duration(milliseconds: delayMs);
+    
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(reconnectDelay, () async {
-      // Try to reconnect to the same server
-      // Note: You might want to store the server URL for reconnection
-      if (kDebugMode) print('🔄 Reconnecting...');
-      // Implementation depends on how you want to handle reconnection
-      // You might need to emit an event that the UI can listen to
+    _reconnectTimer = Timer(delay, () async {
+      if (_manualDisconnect) return;
+      
+      if (kDebugMode) print('🔄 Reconnecting to $_serverUrl...');
+      
+      if (_serverUrl != null) {
+        final success = await connect(_serverUrl!, playerName: _playerName);
+        if (!success && !_manualDisconnect) {
+          _attemptReconnect();
+        }
+      }
     });
+  }
+  
+  void dispose() {
+    _manualDisconnect = true;
+    _closeConnection();
+    
+    if (_messageController != null && !_messageController!.isClosed) {
+      _messageController!.close();
+    }
+    _messageController = null;
+    
+    if (_connectionStateController != null && !_connectionStateController!.isClosed) {
+      _connectionStateController!.close();
+    }
+    _connectionStateController = null;
   }
 }

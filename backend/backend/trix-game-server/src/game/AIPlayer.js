@@ -14,25 +14,31 @@ class AIPlayer {
       medium: new MediumStrategy(),
       hard: new HardStrategy()
     };
+    Logger.info(`[AIPlayer] Created AIPlayer with difficulty: ${difficulty}`);
   }
 
   // Main AI decision method
   makeMove(gameState, playerPosition) {
+    Logger.info(`[AIPlayer] makeMove called for position: ${playerPosition}, difficulty: ${this.difficulty}`);
+    Logger.debug(`[AIPlayer] gameState.phase: ${gameState.phase}, playerPosition: ${playerPosition}`);
     const strategy = this.strategies[this.difficulty];
+    if (!strategy || typeof strategy.selectMove !== 'function') {
+      Logger.error(`❌ AIPlayer.makeMove: strategy or selectMove is undefined for difficulty '${this.difficulty}' (player: ${playerPosition})`);
+      throw new Error(`AIPlayer: No valid strategy for difficulty '${this.difficulty}'`);
+    }
     const move = strategy.selectMove(gameState, playerPosition);
-    
+    Logger.info(`[AIPlayer] Strategy selected move: ${JSON.stringify(move)} for player: ${playerPosition}`);
     if (!move) {
-      console.error('❌ AI strategy returned null move for player:', playerPosition);
+      Logger.error(`❌ AI strategy returned null move for player: ${playerPosition}`);
       throw new Error(`AI player ${playerPosition} could not make a valid move`);
     }
-    
     Logger.info(`🤖 AI ${playerPosition} (${this.difficulty}): ${move.action} - ${move.cardId || move.contract}`);
-    
     return move;
   }
 
   // Contract selection for AI
   selectContract(gameState, playerPosition) {
+    Logger.info(`[AIPlayer] selectContract called for position: ${playerPosition}, difficulty: ${this.difficulty}`);
     const strategy = this.strategies[this.difficulty];
     return strategy.selectContract(gameState, playerPosition);
   }

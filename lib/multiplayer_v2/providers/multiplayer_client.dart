@@ -132,23 +132,28 @@ class MultiplayerClient with ChangeNotifier {
 
   void playCard(String cardId) {
     if (_currentRoomId == null || _currentGame == null) {
+      print('❌ [CLIENT] playCard called but not in game.');
       _setError('Cannot play card: not in game');
       return;
     }
-    
-    // Validate that the player actually has this card
     final myPosition = this.myPosition;
     if (myPosition != null) {
       final myPlayer = _currentGame!.players[myPosition];
       if (myPlayer != null) {
         final hasCard = myPlayer.hand.any((card) => card.id == cardId);
+        print('[CLIENT] playCard: myPosition=$myPosition, cardId=$cardId, hasCard=$hasCard');
         if (!hasCard) {
+          print('❌ [CLIENT] You do not have this card: $cardId');
           _setError('You do not have this card: $cardId');
           return;
         }
+      } else {
+        print('❌ [CLIENT] myPlayer is null for position $myPosition');
       }
+    } else {
+      print('❌ [CLIENT] myPosition is null');
     }
-    
+    print('[CLIENT] Sending playCard to server: roomId=$_currentRoomId, cardId=$cardId');
     _websocket.playCard(_currentRoomId!, cardId);
   }
 
@@ -224,6 +229,9 @@ class MultiplayerClient with ChangeNotifier {
       case 'CONTRACT_SELECTED':
         _handleContractSelected(message);
         break;
+      case 'GET_GAME_STATE':
+        handleGameStateSync(message);
+        break;
       case 'ERROR':
         _handleError(message);
         break;
@@ -292,22 +300,16 @@ class MultiplayerClient with ChangeNotifier {
     if (gameData != null) {
       _currentGame = ServerGame.fromJson(gameData);
       _setState(MultiplayerState.inGame);
-      
-      // Debug logging for card synchronization
+      // Enhanced debug logging for turn and hand sync
       if (_currentGame != null) {
-        final myPosition = this.myPosition;
-        if (myPosition != null) {
-          final myPlayer = _currentGame!.players[myPosition];
-          if (myPlayer != null) {
-            print('🎯 [Flutter Card Sync] Player: $myPosition, Hand size: ${myPlayer.hand.length}');
-            if (myPlayer.hand.isNotEmpty) {
-              final cardIds = myPlayer.hand.map((c) => c.id).join(', ');
-              print('🎯 [Flutter Card Sync] Cards: [$cardIds]');
-            }
-          }
-        }
+        print('🔄 [DEBUG] GameStateUpdate:');
+        print('   Phase: ${_currentGame!.phase}');
+        print('   Current Player: ${_currentGame!.currentPlayer}');
+        print('   Is My Turn: $isMyTurn');
+        _currentGame!.players.forEach((position, player) {
+          print('   Player $position: ${player.name}, Hand size: ${player.hand.length}, isAI: ${player.isAI}');
+        });
       }
-      
       notifyListeners();
     }
   }
@@ -378,30 +380,33 @@ class MultiplayerClient with ChangeNotifier {
       print('🃏 CARD_PLAYED received:');
       print('   Card: $cardData');
       print('   Player: $playerData');
-      print('   Game State: $gameStateData');
     }
     
-    // Update the current game state if provided
+    // Use full game state update if available
     if (gameStateData != null) {
       try {
         _currentGame = ServerGame.fromJson(gameStateData);
+        print('🔄 [DEBUG] CardPlayed (Updated):');
+        print('   Phase: ${_currentGame!.phase}');
+        print('   Current Player: ${_currentGame!.currentPlayer}');
+        print('   Is My Turn: $isMyTurn');
+        _currentGame!.players.forEach((position, player) {
+          print('   Player $position: ${player.name}, Hand size: ${player.hand.length}, isAI: ${player.isAI}');
+        });
         if (kDebugMode) print('✅ Updated game state from CARD_PLAYED message');
       } catch (e) {
         if (kDebugMode) print('❌ Error parsing game state from CARD_PLAYED: $e');
       }
-    }
-    
-    // Notify listeners about the card play
-    notifyListeners();
-    
-    // If no game state was provided, request an update
-    if (gameStateData == null) {
+    } else {
+      // Request full state if not provided
       if (kDebugMode) print('🔄 Requesting updated game state from server');
       _websocket.sendMessage({
         'type': 'GET_GAME_STATE',
         'timestamp': DateTime.now().toIso8601String()
       });
     }
+    
+    notifyListeners();
   }
 
   void _handleAIRemoved(ServerMessage message) {
@@ -427,6 +432,73 @@ class MultiplayerClient with ChangeNotifier {
     _currentRoom = null;
     _setState(MultiplayerState.connected);
     _setError('You were kicked from the room by the host');
+    
+    // Attempt automatic reconnection
+    _attemptReconnection();
+  }
+  
+  // Reconnection handling
+  Future<void> _attemptReconnection() async {
+    if (_serverUrl == null || _playerName == null) {
+      print('❌ Cannot reconnect: missing server URL or player name');
+      return;
+    }
+    
+    print('🔄 Attempting to reconnect to server...');
+    
+    try {
+      // Wait before first reconnect attempt
+      await Future.delayed(Duration(seconds: 2));
+      
+      final success = await _websocket.connect(_serverUrl!, playerName: _playerName!);
+      
+      if (success) {
+        print('✅ Reconnected to server successfully');
+        _setState(MultiplayerState.connected);
+        _clearError();
+        
+        // Request game state if we were in a game
+        if (_currentRoomId != null) {
+          print('📥 Requesting game state sync...');
+          _websocket.sendMessage({
+            'type': 'GET_GAME_STATE',
+            'roomId': _currentRoomId,
+            'timestamp': DateTime.now().toIso8601String()
+          });
+        }
+      } else {
+        print('❌ Reconnection failed, retrying...');
+        _setError('Reconnection failed');
+        
+        // Retry after delay
+        await Future.delayed(Duration(seconds: 5));
+        await _attemptReconnection();
+      }
+    } catch (e) {
+      print('❌ Reconnection error: $e');
+      _setError('Reconnection error: $e');
+      
+      // Retry after delay
+      await Future.delayed(Duration(seconds: 5));
+      await _attemptReconnection();
+    }
+  }
+  
+  // Handle game state sync response
+  Future<void> handleGameStateSync(ServerMessage message) async {
+    final gameData = message.data['gameState'];
+    if (gameData != null) {
+      try {
+        _currentGame = ServerGame.fromJson(gameData);
+        print('✅ Game state synced after reconnection');
+        print('   Current phase: ${_currentGame!.phase}');
+        print('   Current player: ${_currentGame!.currentPlayer}');
+        print('   My turn: $isMyTurn');
+        notifyListeners();
+      } catch (e) {
+        print('❌ Error syncing game state: $e');
+      }
+    }
   }
 
   void _handleGameStarted(ServerMessage message) {

@@ -75,11 +75,13 @@ class ServerPlayer {
   });
 
   factory ServerPlayer.fromJson(Map<String, dynamic> json) {
+    final isAIValue = json['isAI'] ?? false;
+    print('[DEBUG] ServerPlayer.fromJson: name=${json['name']}, isAI=$isAIValue');
     return ServerPlayer(
       sessionId: json['sessionId'] ?? '',
       name: json['name'] ?? '',
       position: json['position'] ?? 'north',
-      isAI: json['isAI'] ?? false,
+      isAI: isAIValue,
       isHost: json['isHost'] ?? false,
       isConnected: json['isConnected'] ?? true,
     );
@@ -326,6 +328,237 @@ class ServerTrick {
       winner: json['winner'],
       isComplete: json['isComplete'] ?? false,
     );
+  }
+}
+
+// Delta update classes for optimized state synchronization
+class GameStateDelta {
+  final String? phase;
+  final String? currentPlayer;
+  final String? currentContract;
+  final String? currentKing;
+  final Map<String, PlayerDelta>? playerDeltas;
+  final TrickDelta? currentTrickDelta;
+  final TrickDelta? lastCompletedTrickDelta;
+  final Map<String, int>? tricksWonDelta;
+  final String timestamp;
+
+  GameStateDelta({
+    this.phase,
+    this.currentPlayer,
+    this.currentContract,
+    this.currentKing,
+    this.playerDeltas,
+    this.currentTrickDelta,
+    this.lastCompletedTrickDelta,
+    this.tricksWonDelta,
+    required this.timestamp,
+  });
+
+  factory GameStateDelta.fromJson(Map<String, dynamic> json) {
+    return GameStateDelta(
+      phase: json['phase'],
+      currentPlayer: json['currentPlayer'],
+      currentContract: json['currentContract'],
+      currentKing: json['currentKing'],
+      playerDeltas: json['playerDeltas'] != null
+          ? Map<String, PlayerDelta>.from(
+              json['playerDeltas'].map((k, v) => MapEntry(k, PlayerDelta.fromJson(v)))
+            )
+          : null,
+      currentTrickDelta: json['currentTrickDelta'] != null
+          ? TrickDelta.fromJson(json['currentTrickDelta'])
+          : null,
+      lastCompletedTrickDelta: json['lastCompletedTrickDelta'] != null
+          ? TrickDelta.fromJson(json['lastCompletedTrickDelta'])
+          : null,
+      tricksWonDelta: json['tricksWonDelta'] != null
+          ? Map<String, int>.from(json['tricksWonDelta'])
+          : null,
+      timestamp: json['timestamp'] ?? DateTime.now().toIso8601String(),
+    );
+  }
+}
+
+class PlayerDelta {
+  final String? name;
+  final bool? isConnected;
+  final int? tricksWon;
+  final int? score;
+  final int? totalScore;
+  final int? handSize;
+  final List<ServerCard>? addedCards;
+  final List<String>? removedCardIds;
+
+  PlayerDelta({
+    this.name,
+    this.isConnected,
+    this.tricksWon,
+    this.score,
+    this.totalScore,
+    this.handSize,
+    this.addedCards,
+    this.removedCardIds,
+  });
+
+  factory PlayerDelta.fromJson(Map<String, dynamic> json) {
+    return PlayerDelta(
+      name: json['name'],
+      isConnected: json['isConnected'],
+      tricksWon: json['tricksWon'],
+      score: json['score'],
+      totalScore: json['totalScore'],
+      handSize: json['handSize'],
+      addedCards: json['addedCards'] != null
+          ? List<ServerCard>.from((json['addedCards'] as List).map((c) => ServerCard.fromJson(c)))
+          : null,
+      removedCardIds: json['removedCardIds'] != null
+          ? List<String>.from(json['removedCardIds'])
+          : null,
+    );
+  }
+}
+
+class TrickDelta {
+  final Map<String, ServerCard?>? cardChanges;
+  final String? winner;
+  final bool? isComplete;
+
+  TrickDelta({
+    this.cardChanges,
+    this.winner,
+    this.isComplete,
+  });
+
+  factory TrickDelta.fromJson(Map<String, dynamic> json) {
+    return TrickDelta(
+      cardChanges: json['cardChanges'] != null
+          ? Map<String, ServerCard?>.from(
+              json['cardChanges'].map((k, v) => MapEntry(k,
+                v != null ? ServerCard.fromJson(v) : null))
+            )
+          : null,
+      winner: json['winner'],
+      isComplete: json['isComplete'],
+    );
+  }
+}
+
+// State cache for optimized updates
+class GameStateCache {
+  ServerGame? _cachedGame;
+  String? _lastUpdateTimestamp;
+
+  ServerGame? get cachedGame => _cachedGame;
+  String? get lastUpdateTimestamp => _lastUpdateTimestamp;
+
+  void updateWithDelta(GameStateDelta delta) {
+    if (_cachedGame == null) return;
+
+    // Create updated players map
+    final updatedPlayers = Map<String, ServerGamePlayer>.from(_cachedGame!.players);
+    
+    if (delta.playerDeltas != null) {
+      delta.playerDeltas!.forEach((position, playerDelta) {
+        final existingPlayer = updatedPlayers[position];
+        if (existingPlayer != null) {
+          // Update hand with delta changes
+          List<ServerCard> updatedHand = List.from(existingPlayer.hand);
+          
+          if (playerDelta.removedCardIds != null) {
+            updatedHand.removeWhere((card) => playerDelta.removedCardIds!.contains(card.id));
+          }
+          
+          if (playerDelta.addedCards != null) {
+            updatedHand.addAll(playerDelta.addedCards!);
+          }
+
+          updatedPlayers[position] = ServerGamePlayer(
+            id: existingPlayer.id,
+            name: playerDelta.name ?? existingPlayer.name,
+            position: existingPlayer.position,
+            isAI: existingPlayer.isAI,
+            tricksWon: playerDelta.tricksWon ?? existingPlayer.tricksWon,
+            score: playerDelta.score ?? existingPlayer.score,
+            totalScore: playerDelta.totalScore ?? existingPlayer.totalScore,
+            isConnected: playerDelta.isConnected ?? existingPlayer.isConnected,
+            handSize: playerDelta.handSize ?? existingPlayer.handSize,
+            hand: updatedHand,
+          );
+        }
+      });
+    }
+
+    // Update current trick
+    ServerTrick? updatedCurrentTrick = _cachedGame!.currentTrick;
+    if (delta.currentTrickDelta != null) {
+      final trickDelta = delta.currentTrickDelta!;
+      final existingCards = updatedCurrentTrick?.cards ?? <String, ServerCard?>{};
+      final updatedCards = Map<String, ServerCard?>.from(existingCards);
+      
+      if (trickDelta.cardChanges != null) {
+        updatedCards.addAll(trickDelta.cardChanges!);
+      }
+      
+      updatedCurrentTrick = ServerTrick(
+        cards: updatedCards,
+        winner: trickDelta.winner ?? updatedCurrentTrick?.winner,
+        isComplete: trickDelta.isComplete ?? updatedCurrentTrick?.isComplete ?? false,
+      );
+    }
+
+    // Update last completed trick
+    ServerTrick? updatedLastTrick = _cachedGame!.lastCompletedTrick;
+    if (delta.lastCompletedTrickDelta != null) {
+      final trickDelta = delta.lastCompletedTrickDelta!;
+      final existingCards = updatedLastTrick?.cards ?? <String, ServerCard?>{};
+      final updatedCards = Map<String, ServerCard?>.from(existingCards);
+      
+      if (trickDelta.cardChanges != null) {
+        updatedCards.addAll(trickDelta.cardChanges!);
+      }
+      
+      updatedLastTrick = ServerTrick(
+        cards: updatedCards,
+        winner: trickDelta.winner ?? updatedLastTrick?.winner,
+        isComplete: trickDelta.isComplete ?? updatedLastTrick?.isComplete ?? false,
+      );
+    }
+
+    // Update tricks won
+    final updatedTricksWon = Map<String, int>.from(_cachedGame!.tricksWon);
+    if (delta.tricksWonDelta != null) {
+      updatedTricksWon.addAll(delta.tricksWonDelta!);
+    }
+
+    // Create updated game state
+    _cachedGame = ServerGame(
+      gameId: _cachedGame!.gameId,
+      phase: delta.phase ?? _cachedGame!.phase,
+      currentContract: delta.currentContract ?? _cachedGame!.currentContract,
+      currentPlayer: delta.currentPlayer ?? _cachedGame!.currentPlayer,
+      currentKing: delta.currentKing ?? _cachedGame!.currentKing,
+      round: _cachedGame!.round,
+      kingdom: _cachedGame!.kingdom,
+      usedContracts: _cachedGame!.usedContracts,
+      currentTrick: updatedCurrentTrick,
+      lastCompletedTrick: updatedLastTrick,
+      tricksWon: updatedTricksWon,
+      players: updatedPlayers,
+      timestamp: delta.timestamp,
+    );
+    
+    _lastUpdateTimestamp = delta.timestamp;
+  }
+
+  void updateWithFullState(ServerGame game) {
+    _cachedGame = game;
+    _lastUpdateTimestamp = game.timestamp;
+  }
+
+  void clear() {
+    _cachedGame = null;
+    _lastUpdateTimestamp = null;
   }
 }
 

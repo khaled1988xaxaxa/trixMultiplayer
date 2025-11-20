@@ -8,6 +8,7 @@ import '../services/enhanced_elite_ai_service.dart';
 import '../services/strategic_elite_ai_service.dart';
 import '../services/web_strategic_elite_ai_service.dart';
 import '../services/enhanced_trix_ai_agent.dart';
+import '../utils/ai_processing_optimizer.dart';
 import 'package:flutter/foundation.dart';
 
 /// AI-controlled player that uses trained models to make decisions
@@ -120,50 +121,67 @@ class AIPlayer extends Player {
       throw StateError('No valid cards available for AI player');
     }
 
-    // Add thinking delay based on difficulty (for realism)
-    await _addThinkingDelay();
+    // Use optimized AI processing with adaptive delays
+    return await AIProcessingOptimizer().processAIDecision(
+      playerId: id,
+      difficulty: _difficulty,
+      aiDecisionFunction: () => _selectCardWithAI(validCards, gameState),
+      isGameSpeedFast: AIProcessingConfig.enableFastMode,
+      allowParallelProcessing: AIProcessingConfig.enableParallelProcessing,
+    ) ?? validCards.first;
+  }
 
-    // Try Human Enhanced AI for humanEnhanced difficulty
-    if (_difficulty == AIDifficulty.humanEnhanced) {
-      Card? humanEnhancedCard = await _tryHumanEnhancedAI(validCards, gameState);
-      if (humanEnhancedCard != null) {
-        return humanEnhancedCard;
+  /// Internal AI card selection logic without delays
+  Future<Card?> _selectCardWithAI(List<Card> validCards, TrixGameState gameState) async {
+    try {
+      // Try Human Enhanced AI for humanEnhanced difficulty
+      if (_difficulty == AIDifficulty.humanEnhanced) {
+        Card? humanEnhancedCard = await _tryHumanEnhancedAI(validCards, gameState);
+        if (humanEnhancedCard != null) {
+          return humanEnhancedCard;
+        }
+        // Fall through to normal AI if Human Enhanced AI fails
+        if (kDebugMode) {
+          print('🔄 Human Enhanced AI failed, trying other AI systems...');
+        }
       }
-      // Fall through to normal AI if Human Enhanced AI fails
+
+      // Try Elite AI for Claude Sonnet and ChatGPT (Enhanced 90% performance)
+      if (_difficulty == AIDifficulty.claudeSonnet || _difficulty == AIDifficulty.chatGPT) {
+        Card? eliteCard = await _tryEliteAI(validCards, gameState);
+        if (eliteCard != null) {
+          return eliteCard;
+        }
+        // Fall through to normal AI if Elite AI fails
+        if (kDebugMode) {
+          print('🔄 Enhanced Elite AI failed for ${_difficulty.englishName}, trying Strategic AI...');
+        }
+      }
+
+      // Try Strategic Elite AI for all difficulty levels (60-70% performance)
+      Card? strategicCard = await _tryStrategicEliteAI(validCards, gameState);
+      if (strategicCard != null) {
+        return strategicCard;
+      }
+
       if (kDebugMode) {
-        print('🔄 Human Enhanced AI failed, trying other AI systems...');
+        print('🔄 All Elite AI systems failed for ${_difficulty.englishName}, using standard AI');
       }
-    }
 
-    // Try Elite AI for Claude Sonnet and ChatGPT (Enhanced 90% performance)
-    if (_difficulty == AIDifficulty.claudeSonnet || _difficulty == AIDifficulty.chatGPT) {
-      Card? eliteCard = await _tryEliteAI(validCards, gameState);
-      if (eliteCard != null) {
-        return eliteCard;
-      }
-      // Fall through to normal AI if Elite AI fails
+      // Let regular AI select the card
+      Card selectedCard = _ai.selectCard(
+        validCards: validCards,
+        gameState: gameState,
+      );
+
+      return selectedCard;
+    } catch (e) {
       if (kDebugMode) {
-        print('🔄 Enhanced Elite AI failed for ${_difficulty.englishName}, trying Strategic AI...');
+        print('❌ Error in AI card selection: $e');
       }
+      // Fallback to first valid card
+      return validCards.first;
     }
-
-    // Try Strategic Elite AI for all difficulty levels (60-70% performance)
-    Card? strategicCard = await _tryStrategicEliteAI(validCards, gameState);
-    if (strategicCard != null) {
-      return strategicCard;
-    }
-
-    if (kDebugMode) {
-      print('🔄 All Elite AI systems failed for ${_difficulty.englishName}, using standard AI');
-    }
-
-    // Let regular AI select the card
-    Card selectedCard = _ai.selectCard(
-      validCards: validCards,
-      gameState: gameState,
-    );
-
-    return selectedCard;
   }
 
   /// Try to use Enhanced Elite AI service for card selection (90% performance)
@@ -731,12 +749,22 @@ class AIPlayer extends Player {
     required List<TrexContract> availableContracts,
     required Map<PlayerPosition, int> currentScores,
   }) async {
-    // Add thinking delay
-    await _addThinkingDelay();
-
-    // For now, use simple rule-based contract selection
-    // This could be enhanced with AI models in the future
-    return _selectContractByRules(availableContracts, currentScores);
+    // Use optimized delay for contract selection
+    final delay = AIProcessingOptimizer().getOptimizedDelay(
+      _difficulty,
+      isGameSpeedFast: AIProcessingConfig.enableFastMode,
+    );
+    
+    // Start contract selection immediately
+    final contractFuture = Future.value(_selectContractByRules(availableContracts, currentScores));
+    
+    // Wait for both contract selection and minimum delay
+    final results = await Future.wait([
+      contractFuture,
+      Future.delayed(Duration(milliseconds: delay)),
+    ]);
+    
+    return results[0] as TrexContract?;
   }
 
   /// Rule-based contract selection (can be enhanced with AI later)
